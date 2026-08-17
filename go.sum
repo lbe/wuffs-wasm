@@ -1,0 +1,4 @@
+github.com/lbe/wasm2go-wasi-host v0.0.0-20260607151207-5e095ad9072e h1:eAiSfhGLE2goYRa05/ok6uEiyiwUXhn0Yl8f/+57BxI=
+github.com/lbe/wasm2go-wasi-host v0.0.0-20260607151207-5e095ad9072e/go.mod h1:RIEgmOaTHDLPvCkYuj38mDUkuFiml7ABsZ4kuN9Kgh4=
+golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
+golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=

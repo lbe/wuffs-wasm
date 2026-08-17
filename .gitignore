@@ -1,0 +1,30 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Coverage output
+coverage.out
+coverage.html
+*.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# WASM toolchain and build intermediates
+tools/
+wasm/build/
+
+# Editor
+.vscode/launch.json
+
+.pi/
+
+

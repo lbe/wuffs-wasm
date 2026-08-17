@@ -1,0 +1,23 @@
+# treefmt — https://treefmt.com
+[global]
+excludes = ["tmp/**", ".git/**"]
+
+[formatter.gofmt]
+command = "gofmt"
+options = ["-w"]
+includes = ["*.go"]
+
+[formatter.goimports]
+command = "goimports"
+options = ["-w"]
+includes = ["*.go"]
+
+[formatter.dprint]
+command = "dprint"
+options = ["fmt", "--config", "dprint.json"]
+includes = ["*.md"]
+
+[formatter.shfmt]
+command = "shfmt"
+options = ["-i", "2", "-s", "-w"]
+includes = ["*.sh"]
