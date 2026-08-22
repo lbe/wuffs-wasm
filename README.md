@@ -20,10 +20,10 @@ image decoders; the Go package only **verifies** the formats listed under
 
 ### Supported (tested)
 
-| Format | Notes |
-| --- | --- |
-| PNG | Still images |
-| WebP | Lossless WebP only (tested) |
+| Format | Notes                       |
+| ------ | --------------------------- |
+| PNG    | Still images                |
+| WebP   | Lossless WebP only (tested) |
 
 ### Not yet verified
 
@@ -31,20 +31,20 @@ These decoders are compiled into the wasm guest and may work via `DecodeRGBA`,
 but they are not covered by integration tests yet. Behavior is not guaranteed
 until we add fixtures and tests.
 
-| Format | Notes |
-| --- | --- |
-| JPEG | |
-| GIF | First frame only (see limitations) |
-| WebP | Lossy variants not yet tested |
-| BMP | |
-| TGA | |
-| QOI | |
-| Netpbm (PBM/PGM/PPM) | |
-| WBMP | |
-| NIE | |
-| ETC2 | GPU texture format |
-| ThumbHash | Placeholder hash, not a conventional image file |
-| Handsum (HNSM) | |
+| Format               | Notes                                           |
+| -------------------- | ----------------------------------------------- |
+| JPEG                 |                                                 |
+| GIF                  | First frame only (see limitations)              |
+| WebP                 | Lossy variants not yet tested                   |
+| BMP                  |                                                 |
+| TGA                  |                                                 |
+| QOI                  |                                                 |
+| Netpbm (PBM/PGM/PPM) |                                                 |
+| WBMP                 |                                                 |
+| NIE                  |                                                 |
+| ETC2                 | GPU texture format                              |
+| ThumbHash            | Placeholder hash, not a conventional image file |
+| Handsum (HNSM)       |                                                 |
 
 ### Not supported
 
@@ -107,14 +107,14 @@ if err := d.Reserve(4*1024*1024, len(pngSrc)); err != nil {
 
 ## API
 
-| Symbol | Description |
-| --- | --- |
-| `New()` | Construct a decoder (initializes the wasm guest). |
-| `(*Decoder) DecodeRGBA(dst, src)` | Decode a supported image into `dst`; returns `*Meta` on success. |
-| `(*Decoder) Reserve(dstBytes, srcBytes)` | Grow wasm src/dst slots before decode. |
-| `(*Decoder) Version()` / `VersionNum()` | Embedded Wuffs library version. |
-| `ErrUnknownFormat`, `ErrSrcTooLarge`, `ErrDecode` | Sentinel errors. |
-| `*DstTooSmallError` | Structured error with required buffer size and image dimensions. |
+| Symbol                                            | Description                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| `New()`                                           | Construct a decoder (initializes the wasm guest).                |
+| `(*Decoder) DecodeRGBA(dst, src)`                 | Decode a supported image into `dst`; returns `*Meta` on success. |
+| `(*Decoder) Reserve(dstBytes, srcBytes)`          | Grow wasm src/dst slots before decode.                           |
+| `(*Decoder) Version()` / `VersionNum()`           | Embedded Wuffs library version.                                  |
+| `ErrUnknownFormat`, `ErrSrcTooLarge`, `ErrDecode` | Sentinel errors.                                                 |
+| `*DstTooSmallError`                               | Structured error with required buffer size and image dimensions. |
 
 A `Decoder` is not safe for concurrent use. Use one decoder per goroutine, or serialize access.
 

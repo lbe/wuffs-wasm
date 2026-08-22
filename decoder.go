@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"image"
 
-	"github.com/lbe/wuffs-wasm/internal/wuffswasm"
 	wasihost "github.com/lbe/wasm2go-wasi-host"
+	"github.com/lbe/wuffs-wasm/internal/wuffswasm"
 )
 
 // Decoder wraps the wasm2go-generated wuffs module and WASI host state.

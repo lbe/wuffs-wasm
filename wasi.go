@@ -3,8 +3,8 @@ package wuffs
 import (
 	"crypto/rand"
 
-	"github.com/lbe/wuffs-wasm/internal/wuffswasm"
 	wasihost "github.com/lbe/wasm2go-wasi-host"
+	"github.com/lbe/wuffs-wasm/internal/wuffswasm"
 )
 
 // newWASIState creates the WASI host state for a single Decoder. The memory
