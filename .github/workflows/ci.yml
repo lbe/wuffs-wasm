@@ -19,13 +19,14 @@ jobs:
       - name: Install format tools
         run: |
           TREE_VERSION=2.5.0
-          curl -fsSL "https://github.com/numtide/treefmt/releases/download/v${TREE_VERSION}/treefmt_${TREE_VERSION}_linux_amd64.tar.gz" | tar -xz
-          sudo mv treefmt /usr/local/bin/
+          mkdir -p /tmp/treefmt-install
+          curl -fsSL "https://github.com/numtide/treefmt/releases/download/v${TREE_VERSION}/treefmt_${TREE_VERSION}_linux_amd64.tar.gz" | tar -xz -C /tmp/treefmt-install
+          sudo mv /tmp/treefmt-install/treefmt /usr/local/bin/
           go install golang.org/x/tools/cmd/goimports@latest
           go install mvdan.cc/sh/v3/cmd/shfmt@latest
-          curl -fsSL https://github.com/dprint/dprint/releases/download/0.55.2/dprint-x86_64-unknown-linux-gnu.zip -o dprint.zip
-          unzip -q dprint.zip
-          sudo mv dprint /usr/local/bin/
+          curl -fsSL https://github.com/dprint/dprint/releases/download/0.55.2/dprint-x86_64-unknown-linux-gnu.zip -o /tmp/dprint.zip
+          unzip -q /tmp/dprint.zip -d /tmp/dprint-install
+          sudo mv /tmp/dprint-install/dprint /usr/local/bin/
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Run format check
