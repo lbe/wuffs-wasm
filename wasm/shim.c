@@ -6,7 +6,24 @@
 
 #include "../../wuffs-mirror-release-c/release/c/wuffs-v0.4.c"
 
-#define WUFFS_WASM_WORKBUF_SIZE (1024 * 1024)
+// ── Bump allocator ──────────────────────────────────────────────────────
+// Lives above the wasm stack [0, 0x800000) at 0x900000. Rewound at the
+// start of every wuffs_decode_image call so that repeated decodes reuse
+// the same region.
+static uint8_t* bump_ptr  = (uint8_t*)(uintptr_t)0x900000;
+static uint8_t* bump_base = (uint8_t*)(uintptr_t)0x900000;
+
+enum { BUMP_LIMIT = 4194304 };  // 4 MiB max per allocation
+
+static void bump_rewind(void) { bump_ptr = bump_base; }
+
+static uint8_t* bump_alloc(uint32_t size) {
+  // 8-byte align
+  size = (size + 7u) & ~7u;
+  uint8_t* p = bump_ptr;
+  bump_ptr += size;
+  return p;
+}
 
 typedef struct wuffs_wasm_decode_meta {
   int32_t err;
@@ -139,6 +156,9 @@ static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off
     return WUFFS_WASM_ERR_BAD_ARG;
   }
 
+  // Rewind bump allocator for this decode call.
+  bump_rewind();
+
   uint8_t* src_ptr = mem_ptr(src_off);
   uint8_t* dst_ptr = mem_ptr(dst_off);
   wuffs_wasm_decode_meta* meta = (wuffs_wasm_decode_meta*)mem_ptr(meta_off);
@@ -151,18 +171,14 @@ static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off
     return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
   }
 
-  uint8_t workbuf[WUFFS_WASM_WORKBUF_SIZE];
-  wuffs_base__slice_u8 work_slice = {
-      .ptr = workbuf,
-      .len = WUFFS_WASM_WORKBUF_SIZE,
-  };
-
-  uint8_t dec_storage[4096];
-  if (slot->obj_size > sizeof(dec_storage)) {
+  // Guard: reject decoders whose object exceeds bump limit.
+  if (slot->obj_size > BUMP_LIMIT) {
     meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
   }
-  void* dec = dec_storage;
+
+  // Allocate decoder from bump region.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
   memset(dec, 0, slot->obj_size);
 
   wuffs_base__status status =
@@ -207,6 +223,23 @@ static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off
     meta->err = WUFFS_WASM_ERR_DST_TOO_SMALL;
     return WUFFS_WASM_ERR_DST_TOO_SMALL;
   }
+
+  // Allocate workbuf sized by the decoder (not hardcoded).
+  // Wuffs reports workbuf length as range [L, L]; use max_incl as the byte length.
+  wuffs_base__range_ii_u64 wb_range = wuffs_base__image_decoder__workbuf_len(decoder);
+  if (wb_range.min_incl > wb_range.max_incl) {
+    meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+  uint32_t wb_len = (uint32_t)wb_range.max_incl;
+  if (wb_len == 0) {
+    wb_len = 64 * 1024;  // minimum 64 KiB fallback
+  }
+  uint8_t* workbuf = bump_alloc(wb_len);
+  wuffs_base__slice_u8 work_slice = {
+      .ptr = workbuf,
+      .len = wb_len,
+  };
 
   wuffs_base__pixel_buffer pb = {0};
   wuffs_base__slice_u8 pix_slice = {.ptr = dst_ptr, .len = dst_cap};

@@ -1,0 +1,22 @@
+# Test Fixtures
+
+Vendored test fixtures from the Wuffs project.
+
+## License
+
+This software (Wuffs) is distributed under the terms of both the MIT license and
+the Apache License (Version 2.0). See https://github.com/google/wuffs/blob/main/LICENSE
+for full details.
+
+Copyright 2023 The Wuffs Authors
+
+## Source
+
+All fixtures are copied from:
+- `../wuffs/test/data/` (Wuffs repository)
+
+## Files
+
+- `bricks-color.png` - PNG test image
+- `harvesters.png` - PNG test image (PNG performance gate fixture)
+- `bricks-color.lossless.webp` - WebP lossless test image

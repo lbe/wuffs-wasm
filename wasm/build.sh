@@ -12,12 +12,12 @@ WASI_URL="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/
 
 PROFILE="${1:-perf}"
 case "$PROFILE" in
-  perf) CLANG_OPT=(-O3 -flto) WASM_OPT_LEVEL=-O3 ;;
-  size) CLANG_OPT=(-Oz -flto) WASM_OPT_LEVEL=-Oz ;;
-  *)
-    echo "usage: $0 [perf|size]" >&2
-    exit 2
-    ;;
+perf) CLANG_OPT=(-O3 -flto) WASM_OPT_LEVEL=-O3 ;;
+size) CLANG_OPT=(-Oz -flto) WASM_OPT_LEVEL=-Oz ;;
+*)
+  echo "usage: $0 [perf|size]" >&2
+  exit 2
+  ;;
 esac
 
 if [[ ! -x "$WASI_SDK/bin/clang" ]]; then
@@ -54,11 +54,9 @@ COMMON_CFLAGS=(
 LDFLAGS=(
   -mexec-model=reactor
   -Wl,--no-entry
-  -Wl,--export=wuffs_version
-  -Wl,--export=wuffs_decode_image
   -Wl,--gc-sections
   -Wl,-z,stack-size=8388608
-  -Wl,--initial-memory=67108864
+  -Wl,--initial-memory=134217728
   -Wl,--max-memory=268435456
 )
 

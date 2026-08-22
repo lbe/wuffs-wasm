@@ -13,13 +13,23 @@ help:
 	@echo "  make cover         - Generate coverage report"
 	@echo "  make format        - Format everything via treefmt (gofmt, goimports, dprint, shfmt)"
 	@echo "  make format-check  - Check formatting without writing"
+	@echo "  make generate      - Rebuild wasm and regenerate Go bindings"
 	@echo "  make lint          - Run golangci-lint"
 	@echo "  make test          - Run tests for $(PKG)"
 	@echo "  make test-race     - Run tests with race detector"
+	@echo "  make wasm          - Compile wasm/shim.c → wasm/wuffs.wasm"
 	@echo ""
 	@echo "Environment variables:"
 	@echo "  PKG=<path>         - Override package (default: $(PKG))"
 	@echo "  ARGS=<flags>       - Extra flags passed to go test (e.g. -v -count=1)"
+
+.PHONY: wasm
+wasm:
+	bash wasm/build.sh
+
+.PHONY: generate
+generate: wasm
+	wasm2go -unsafe -pkg wuffswasm -o internal/wuffswasm/wuffs.go wasm/wuffs.wasm
 
 .PHONY: test
 test:
@@ -28,8 +38,9 @@ test:
 
 .PHONY: test-race
 test-race:
-	# Run all tests with race detector
-	time go test $(PKG) -race $(ARGS)
+	# Run the root wuffs package tests with the race detector, scoped to the
+	# package that owns the Decoder concurrency contract.
+	time go test -race . $(ARGS)
 
 .PHONY: lint
 lint:
