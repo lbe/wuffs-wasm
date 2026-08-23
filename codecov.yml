@@ -1,0 +1,4 @@
+# Exclude generated wasm bindings and helper scripts from coverage reports.
+ignore:
+  - "internal/wuffswasm/**"
+  - "scripts/**"
