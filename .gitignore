@@ -22,3 +22,5 @@ wasm/build/
 
 # env file
 .env
+
+tmp/
