@@ -31,6 +31,7 @@ typedef struct wuffs_wasm_decode_meta {
   uint32_t height;
   uint32_t stride;
   uint32_t bytes_written;
+  uint32_t format;
 } wuffs_wasm_decode_meta;
 
 enum {
@@ -268,7 +269,94 @@ static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off
   meta->height = height;
   meta->stride = width * 4;
   meta->bytes_written = (uint32_t)need;
+  meta->format = fourcc;
   return WUFFS_WASM_OK;
+}
+
+// probe_image reports image dimensions, stride, and format from src without
+// decoding pixels. It mirrors decode_image up to decode_image_config, then
+// overrides the pixel config to the BGRA_PREMUL dest layout (4 bytes/pixel,
+// stride = width * 4) used by decode_image. It allocates no frame, workbuf,
+// or dst, and writes no destination pixels; bytes_written stays 0.
+static int32_t probe_image(uint32_t src_off, uint32_t src_len,
+                           uint32_t meta_off) {
+  if (src_len == 0 || meta_off == 0) {
+    return WUFFS_WASM_ERR_BAD_ARG;
+  }
+
+  // Rewind bump allocator for this probe call.
+  bump_rewind();
+
+  uint8_t* src_ptr = mem_ptr(src_off);
+  wuffs_wasm_decode_meta* meta = (wuffs_wasm_decode_meta*)mem_ptr(meta_off);
+  memset(meta, 0, sizeof(*meta));
+
+  uint32_t fourcc = sniff_fourcc(src_ptr, src_len);
+  const wuffs_wasm_decoder_slot* slot = find_decoder(fourcc);
+  if (slot == NULL) {
+    meta->err = WUFFS_WASM_ERR_UNKNOWN_FORMAT;
+    return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
+  }
+
+  // Guard: reject decoders whose object exceeds bump limit.
+  if (slot->obj_size > BUMP_LIMIT) {
+    meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  // Allocate decoder from bump region.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  memset(dec, 0, slot->obj_size);
+
+  wuffs_base__status status =
+      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+  if (status.repr != NULL) {
+    meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  wuffs_base__image_decoder* decoder = slot->upcast(dec);
+  if (fourcc == WUFFS_BASE__FOURCC__PNG) {
+    wuffs_base__image_decoder__set_quirk(
+        decoder, WUFFS_BASE__QUIRK_IGNORE_CHECKSUM, 1);
+  }
+
+  wuffs_base__io_buffer src = {
+      .data = {.ptr = src_ptr, .len = src_len},
+      .meta = {.wi = src_len, .ri = 0, .pos = 0, .closed = 1},
+  };
+
+  wuffs_base__image_config ic = {0};
+  status = wuffs_base__image_decoder__decode_image_config(decoder, &ic, &src);
+  if (status.repr != NULL) {
+    meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  // Override the pixel config to the BGRA_PREMUL dest layout that
+  // decode_image uses (DecodeRGBA dest is 4 bpp). Stride = width * 4.
+  wuffs_base__pixel_format pixfmt =
+      wuffs_base__make_pixel_format(WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL);
+  wuffs_base__pixel_config__set(
+      &ic.pixcfg, pixfmt.repr, WUFFS_BASE__PIXEL_SUBSAMPLING__NONE,
+      wuffs_base__pixel_config__width(&ic.pixcfg),
+      wuffs_base__pixel_config__height(&ic.pixcfg));
+
+  uint32_t width = wuffs_base__pixel_config__width(&ic.pixcfg);
+  uint32_t height = wuffs_base__pixel_config__height(&ic.pixcfg);
+
+  meta->err = WUFFS_WASM_OK;
+  meta->width = width;
+  meta->height = height;
+  meta->stride = width * 4;
+  meta->bytes_written = 0;
+  meta->format = fourcc;
+  return WUFFS_WASM_OK;
+}
+
+__attribute__((export_name("wuffs_probe_image"))) int32_t wuffs_wasm_probe_image(
+    uint32_t src_off, uint32_t src_len, uint32_t meta_off) {
+  return probe_image(src_off, src_len, meta_off);
 }
 
 __attribute__((export_name("wuffs_version"))) uint32_t wuffs_wasm_version(void) {

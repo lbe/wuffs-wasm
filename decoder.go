@@ -54,6 +54,15 @@ func readMeta(mem []byte, layout SlotLayout) Meta {
 	return ReadMeta(mem, layout.MetaOff)
 }
 
+// checkSrcCapacity rejects src larger than the reserved src-slot capacity,
+// returning ErrSrcTooLarge before any guest call. Callers raise the cap via Reserve.
+func (d *Decoder) checkSrcCapacity(src []byte) error {
+	if len(src) > d.srcCap {
+		return ErrSrcTooLarge
+	}
+	return nil
+}
+
 // DecodeRGBA decodes src (e.g. PNG or WEBP) into the pre-allocated dst.
 // If dst.Rect has zero bounds, the host performs no pre-check and the guest
 // determines image dimensions. If dst.Rect has Dx>0 && Dy>0 and
@@ -65,8 +74,8 @@ func readMeta(mem []byte, layout SlotLayout) Meta {
 func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 	// Host pre-check: reject src that exceeds the src-slot capacity before
 	// any guest call. Callers can raise the cap via Reserve.
-	if len(src) > d.srcCap {
-		return nil, ErrSrcTooLarge
+	if err := d.checkSrcCapacity(src); err != nil {
+		return nil, err
 	}
 
 	// Host pre-check: if caller set a non-zero Rect, Pix must be large enough.
@@ -139,6 +148,53 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 	// Convert BGRA premultiplied → straight RGBA in place.
 	convertBGRAtoRGBA(dst.Pix, dst.Stride, dst.Pix, width, height)
 
+	d.lastMeta = decMeta
+	return &d.lastMeta, nil
+}
+
+// Probe reports image dimensions and format from src without decoding pixels.
+// It sizes the wasm src slot to hold src and calls the guest probe_image export,
+// which sniffs the format and decodes the image config, then overrides the
+// pixel config to the BGRA_PREMUL dest layout (stride = width*4) used by
+// DecodeRGBA. Probe writes no destination pixels; BytesWritten is 0.
+func (d *Decoder) Probe(src []byte) (*Meta, error) {
+	// Host pre-check: reject src that exceeds the src-slot capacity before
+	// any guest call. Callers can raise the cap via Reserve.
+	if err := d.checkSrcCapacity(src); err != nil {
+		return nil, err
+	}
+
+	// Reserve wasm memory for the src and meta slots. The dst slot is left at
+	// its current size — Probe does not grow or touch it.
+	srcBytes := max(len(src), int(d.currentLayout.SrcLen))
+	if err := d.Reserve(int(d.currentLayout.DstLen), srcBytes); err != nil {
+		return nil, err
+	}
+	lay := d.currentLayout
+
+	// Copy source data into the wasm src slot.
+	mem := d.module.Xmemory()
+	memBytes := *mem.Slice()
+	copy(memBytes[lay.SrcOff:lay.SrcOff+uint32(len(src))], src)
+
+	// Invoke the guest probe.
+	ret := d.module.Xwuffs_probe_image(
+		int32(lay.SrcOff), int32(len(src)),
+		int32(lay.MetaOff),
+	)
+
+	// Map guest return codes to host errors. The guest uses
+	// WUFFS_WASM_ERR_BAD_ARG (zero src_len / meta_off) → ErrDecode, matching
+	// decode_image's host mapping.
+	if ret != 0 {
+		return nil, errFromGuestReturn(ret)
+	}
+
+	// Refresh memory view after guest call (guest may have grown memory).
+	memBytes = *d.module.Xmemory().Slice()
+
+	// Read decoded metadata from the guest meta slot.
+	decMeta := readMeta(memBytes, lay)
 	d.lastMeta = decMeta
 	return &d.lastMeta, nil
 }

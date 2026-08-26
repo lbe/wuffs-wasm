@@ -257,6 +257,313 @@ func TestBenchmarkPNGBaselineRecord(t *testing.T) {
 	}
 }
 
+// TestIntegrationProbe_PNG verifies that Probe reports the PNG image
+// dimensions (160×120), stride (640), and format (FormatPNG) for
+// testdata/bricks-color.png without decoding pixels (BytesWritten == 0, err
+// == nil). It also verifies that Probe is repeatable on the same Decoder, and
+// that a Decoder which has already decoded via DecodeRGBA can still Probe.
+func TestIntegrationProbe_PNG(t *testing.T) {
+	pngSrc := loadFixture(t, "bricks-color.png")
+
+	const (
+		wantW     = 160
+		wantH     = 120
+		wantStrid = 640
+		wantFmt   = wuffs.FormatPNG
+	)
+
+	d := wuffs.New()
+
+	meta, err := d.Probe(pngSrc)
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("Probe returned nil Meta")
+	}
+	if meta.Width != wantW {
+		t.Errorf("Probe Meta.Width = %d, want %d", meta.Width, wantW)
+	}
+	if meta.Height != wantH {
+		t.Errorf("Probe Meta.Height = %d, want %d", meta.Height, wantH)
+	}
+	if meta.Stride != wantStrid {
+		t.Errorf("Probe Meta.Stride = %d, want %d", meta.Stride, wantStrid)
+	}
+	if meta.Format != wantFmt {
+		t.Errorf("Probe Meta.Format = 0x%08X, want 0x%08X", meta.Format, wantFmt)
+	}
+	if meta.BytesWritten != 0 {
+		t.Errorf("Probe Meta.BytesWritten = %d, want 0", meta.BytesWritten)
+	}
+
+	// Probe twice on the same Decoder; both must return the same Meta.
+	meta2, err2 := d.Probe(pngSrc)
+	if err2 != nil {
+		t.Fatalf("Probe (second call): %v", err2)
+	}
+	if meta2 == nil {
+		t.Fatal("Probe (second call) returned nil Meta")
+	}
+	if meta2.Width != wantW {
+		t.Errorf("Probe (second call) Meta.Width = %d, want %d", meta2.Width, wantW)
+	}
+	if meta2.Height != wantH {
+		t.Errorf("Probe (second call) Meta.Height = %d, want %d", meta2.Height, wantH)
+	}
+	if meta2.Stride != wantStrid {
+		t.Errorf("Probe (second call) Meta.Stride = %d, want %d", meta2.Stride, wantStrid)
+	}
+	if meta2.Format != wantFmt {
+		t.Errorf("Probe (second call) Meta.Format = 0x%08X, want 0x%08X", meta2.Format, wantFmt)
+	}
+	if meta2.BytesWritten != 0 {
+		t.Errorf("Probe (second call) Meta.BytesWritten = %d, want 0", meta2.BytesWritten)
+	}
+
+	// DecodeRGBA then Probe again on the same Decoder.
+	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+	if _, decErr := d.DecodeRGBA(dst, pngSrc); decErr != nil {
+		t.Fatalf("DecodeRGBA: %v", decErr)
+	}
+	meta3, err3 := d.Probe(pngSrc)
+	if err3 != nil {
+		t.Fatalf("Probe (after DecodeRGBA): %v", err3)
+	}
+	if meta3 == nil {
+		t.Fatal("Probe (after DecodeRGBA) returned nil Meta")
+	}
+	if meta3.Width != wantW {
+		t.Errorf("Probe (after DecodeRGBA) Meta.Width = %d, want %d", meta3.Width, wantW)
+	}
+	if meta3.Height != wantH {
+		t.Errorf("Probe (after DecodeRGBA) Meta.Height = %d, want %d", meta3.Height, wantH)
+	}
+	if meta3.Stride != wantStrid {
+		t.Errorf("Probe (after DecodeRGBA) Meta.Stride = %d, want %d", meta3.Stride, wantStrid)
+	}
+	if meta3.Format != wantFmt {
+		t.Errorf("Probe (after DecodeRGBA) Meta.Format = 0x%08X, want 0x%08X", meta3.Format, wantFmt)
+	}
+	if meta3.BytesWritten != 0 {
+		t.Errorf("Probe (after DecodeRGBA) Meta.BytesWritten = %d, want 0", meta3.BytesWritten)
+	}
+}
+
+// TestIntegrationProbe_SentinelErrors verifies that Probe maps the
+// guest-returned sentinel paths to the expected host sentinel errors, and that
+// an incomplete-but-config-readable PNG still succeeds. It covers: an
+// unrecognized source format (ErrUnknownFormat), zero-length source
+// (ErrDecode), a truncated PNG whose IHDR still yields a valid config (success,
+// not ErrDecode), source exceeding the shrunk src-slot capacity
+// (ErrSrcTooLarge), and a shrunk dst slot where Probe does not grow dst while
+// a subsequent DecodeRGBA still surfaces DstTooSmallError.
+func TestIntegrationProbe_SentinelErrors(t *testing.T) {
+	garbage := []byte("\x00garbage: this is not any supported image format\xff\xfe\x00\x01")
+
+	pngSrc := loadFixture(t, "bricks-color.png")
+	harvest := loadFixture(t, "harvesters.png")
+
+	tests := []struct {
+		name string
+		src  []byte
+		want error // nil means expect success (no error)
+	}{
+		{
+			name: "unknown format returns ErrUnknownFormat",
+			src:  garbage,
+			want: wuffs.ErrUnknownFormat,
+		},
+		{
+			name: "empty src returns ErrDecode",
+			src:  nil,
+			want: wuffs.ErrDecode,
+		},
+		{
+			name: "truncated PNG config succeeds",
+			src:  pngSrc[:50],
+			want: nil,
+		},
+		{
+			name: "src too large returns ErrSrcTooLarge",
+			src:  harvest,
+			want: wuffs.ErrSrcTooLarge,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if errors.Is(tc.want, wuffs.ErrSrcTooLarge) {
+				if got := wuffs.ShrunkMaxSrc(); len(tc.src) <= got {
+					t.Skipf("src (%d bytes) does not exceed shrunk src slot (%d bytes)", len(tc.src), got)
+				}
+			}
+
+			d := wuffs.New()
+			meta, err := d.Probe(tc.src)
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("Probe() error = %v, want nil", err)
+				}
+				if meta == nil {
+					t.Fatal("Probe() returned nil Meta, want non-nil")
+				}
+				if meta.Width != 160 || meta.Height != 120 || meta.Stride != 640 {
+					t.Errorf("Probe Meta = {W:%d H:%d S:%d}, want {W:160 H:120 S:640}", meta.Width, meta.Height, meta.Stride)
+				}
+				return
+			}
+			if !errors.Is(err, tc.want) {
+				t.Errorf("Probe() error = %v, want errors.Is(err, %v) to be true", err, tc.want)
+			}
+		})
+	}
+
+	// Shrunk-dst block: Probe must not grow the dst slot, and a subsequent
+	// DecodeRGBA with an empty Rect must still surface DstTooSmallError.
+	t.Run("shrunk dst slot Probe does not grow dst", func(t *testing.T) {
+		restore := wuffs.SetInitialDstSlotBytes(1024)
+		defer restore()
+
+		d := wuffs.New()
+
+		meta, err := d.Probe(pngSrc)
+		if err != nil {
+			t.Fatalf("Probe() error = %v, want nil", err)
+		}
+		if meta == nil {
+			t.Fatal("Probe() returned nil Meta, want non-nil")
+		}
+		if meta.Width != 160 || meta.Height != 120 || meta.Stride != 640 {
+			t.Errorf("Probe Meta = {W:%d H:%d S:%d}, want {W:160 H:120 S:640}", meta.Width, meta.Height, meta.Stride)
+		}
+		var dstErr *wuffs.DstTooSmallError
+		if errors.As(err, &dstErr) {
+			t.Error("Probe() returned *DstTooSmallError, want success")
+		}
+
+		// Probe did not grow the dst slot.
+		if got := d.MemoryLayout().DstLen; got != 1024 {
+			t.Errorf("MemoryLayout().DstLen = %d, want 1024", got)
+		}
+
+		// Same Decoder, empty Rect, no Reserve: DecodeRGBA must return
+		// *DstTooSmallError (1024-byte dst slot is still too small).
+		empty := &image.RGBA{Rect: image.Rect(0, 0, 0, 0)}
+		_, decErr := d.DecodeRGBA(empty, pngSrc)
+		if decErr == nil {
+			t.Fatal("DecodeRGBA() after Probe error = nil, want *DstTooSmallError")
+		}
+		if !errors.As(decErr, &dstErr) {
+			t.Fatalf("DecodeRGBA() error = %v, want *DstTooSmallError", decErr)
+		}
+	})
+}
+
+// TestIntegrationProbeThenDecodeRGBA_PNG verifies the composed workflow of
+// probing a PNG for its dimensions/stride and then decoding it via DecodeRGBA
+// using the stride reported by Probe to size the destination slot. It asserts
+// the decoded dimensions match the probed dimensions and that the decoded
+// pixel CRC32 matches the checked-in golden value.
+func TestIntegrationProbeThenDecodeRGBA_PNG(t *testing.T) {
+	restore := wuffs.SetInitialDstSlotBytes(1024)
+	defer restore()
+
+	d := wuffs.New()
+
+	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+	pngSrc := loadFixture(t, "bricks-color.png")
+
+	meta, err := d.Probe(pngSrc)
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("Probe returned nil Meta")
+	}
+	if meta.Width != 160 {
+		t.Errorf("Probe Meta.Width = %d, want 160", meta.Width)
+	}
+	if meta.Height != 120 {
+		t.Errorf("Probe Meta.Height = %d, want 120", meta.Height)
+	}
+	if meta.Stride != 640 {
+		t.Errorf("Probe Meta.Stride = %d, want 640", meta.Stride)
+	}
+	if meta.BytesWritten != 0 {
+		t.Errorf("Probe Meta.BytesWritten = %d, want 0", meta.BytesWritten)
+	}
+
+	// Size the dst slot using the Stride from Probe (same bytes as 160*120*4).
+	wuffs.RequiredReserve(d, int(meta.Stride)*int(meta.Height), len(pngSrc))
+
+	meta2, err := d.DecodeRGBA(dst, pngSrc)
+	if err != nil {
+		t.Fatalf("DecodeRGBA: %v", err)
+	}
+	if meta2 == nil {
+		t.Fatal("DecodeRGBA returned nil Meta")
+	}
+	if dst.Rect.Dx() != 160 || dst.Rect.Dy() != 120 {
+		t.Errorf("dst.Rect = %v, want 160x120", dst.Rect)
+	}
+
+	// Compute CRC32 of the decoded pixel data.
+	gotCRC := crc32.ChecksumIEEE(dst.Pix)
+
+	// Read expected CRC32 from golden file.
+	raw := loadFixture(t, "bricks-color.golden.crc32")
+
+	wantCRC, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 32)
+	if err != nil {
+		t.Fatalf("parsing golden CRC32 from testdata/bricks-color.golden.crc32: %v", err)
+	}
+
+	if gotCRC != uint32(wantCRC) {
+		t.Errorf("CRC32 of decoded Pix = 0x%08X, want 0x%08X", gotCRC, uint32(wantCRC))
+	}
+}
+
+// TestIntegrationProbe_WEBP verifies that Probe reports the WebP image
+// dimensions (160×120), stride (640), and format (FormatWEBP) for
+// testdata/bricks-color.lossless.webp without decoding pixels
+// (BytesWritten == 0, err == nil).
+func TestIntegrationProbe_WEBP(t *testing.T) {
+	webpSrc := loadFixture(t, "bricks-color.lossless.webp")
+
+	const (
+		wantW     = 160
+		wantH     = 120
+		wantStrid = 640
+		wantFmt   = wuffs.FormatWEBP
+	)
+
+	d := wuffs.New()
+
+	meta, err := d.Probe(webpSrc)
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("Probe returned nil Meta")
+	}
+	if meta.Width != wantW {
+		t.Errorf("Probe Meta.Width = %d, want %d", meta.Width, wantW)
+	}
+	if meta.Height != wantH {
+		t.Errorf("Probe Meta.Height = %d, want %d", meta.Height, wantH)
+	}
+	if meta.Stride != wantStrid {
+		t.Errorf("Probe Meta.Stride = %d, want %d", meta.Stride, wantStrid)
+	}
+	if meta.Format != wantFmt {
+		t.Errorf("Probe Meta.Format = 0x%08X, want 0x%08X", meta.Format, wantFmt)
+	}
+	if meta.BytesWritten != 0 {
+		t.Errorf("Probe Meta.BytesWritten = %d, want 0", meta.BytesWritten)
+	}
+}
+
 // TestIntegrationDecodeRGBA_PNGGolden verifies that the CRC32 of the decoded
 // RGBA pixel data for testdata/bricks-color.png matches the checked-in golden
 // value in testdata/bricks-color.golden.crc32. The golden file is generated by
@@ -444,6 +751,67 @@ func decodePreallocatedRGBA(t *testing.T, d *wuffs.Decoder, src []byte, wantW, w
 	}
 
 	return meta
+}
+
+// TestIntegrationDecodeRGBA_Format verifies that DecodeRGBA populates the
+// Meta.Format field with the sniffed image format FourCC for each decoded
+// image type. PNG decodes must yield FormatPNG and WEBP decodes must yield
+// FormatWEBP, alongside the correct Width/Height/Stride.
+func TestIntegrationDecodeRGBA_Format(t *testing.T) {
+	tests := []struct {
+		name    string
+		srcFile string
+		wantFmt uint32
+	}{
+		{
+			name:    "BRICK_COLOR_PNG",
+			srcFile: "bricks-color.png",
+			wantFmt: wuffs.FormatPNG,
+		},
+		{
+			name:    "BRICK_COLOR_LOSSLESS_WEBP",
+			srcFile: "bricks-color.lossless.webp",
+			wantFmt: wuffs.FormatWEBP,
+		},
+	}
+
+	const (
+		wantW     = 160
+		wantH     = 120
+		wantStrid = 640
+	)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc := tc
+			t.Parallel()
+
+			src := loadFixture(t, tc.srcFile)
+			d := wuffs.New()
+			dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+
+			meta, err := d.DecodeRGBA(dst, src)
+			if err != nil {
+				t.Fatalf("DecodeRGBA: %v", err)
+			}
+			if meta == nil {
+				t.Fatal("DecodeRGBA returned nil Meta")
+			}
+
+			if got := int(meta.Width); got != wantW {
+				t.Errorf("Meta.Width = %d, want %d", got, wantW)
+			}
+			if got := int(meta.Height); got != wantH {
+				t.Errorf("Meta.Height = %d, want %d", got, wantH)
+			}
+			if got := int(meta.Stride); got != wantStrid {
+				t.Errorf("Meta.Stride = %d, want %d", got, wantStrid)
+			}
+			if meta.Format != tc.wantFmt {
+				t.Errorf("Meta.Format = 0x%08X, want 0x%08X", meta.Format, tc.wantFmt)
+			}
+		})
+	}
 }
 
 // TestIntegrationConcurrentDecoders verifies that two separate *Decoder

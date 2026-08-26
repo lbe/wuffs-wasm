@@ -23,8 +23,8 @@ const (
 	defaultSrcCap = 64 * 1024 // 64 KiB
 
 	// metaSlotBytes is the size of the metadata slot in bytes.
-	// Matches the C wuffs_wasm_decode_meta struct (5 × uint32 = 20 bytes).
-	metaSlotBytes = 20
+	// Matches the C wuffs_wasm_decode_meta struct (6 × uint32 = 24 bytes).
+	metaSlotBytes = 24
 
 	// hostSlotRegionBase is the minimum base offset in wasm linear memory
 	// where host-accessible slots begin. Guest code rejects meta_off == 0,

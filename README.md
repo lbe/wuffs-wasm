@@ -10,7 +10,9 @@
 Pure Go bindings for the [Wuffs](https://github.com/google/wuffs) image decoder.
 Wuffs runs as a WebAssembly guest compiled to Go via [wasm2go](https://github.com/lbe/wasm2go-wasi-host)—no CGO, no native Wuffs library at link time.
 
-`DecodeRGBA` decodes supported inputs into `image.RGBA` with one Go heap allocation per decode (the `image.RGBA` shell; pixel data lives in wasm linear memory until copied out).
+`Probe` reports dimensions and format without decoding pixels. `DecodeRGBA` then
+decodes into `image.RGBA` with one Go heap allocation per decode (the
+`image.RGBA` shell; pixel data lives in wasm linear memory until copied out).
 
 ## Format support
 
@@ -84,37 +86,49 @@ func main() {
 	}
 
 	d := wuffs.New()
-	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
 
-	meta, err := d.DecodeRGBA(dst, pngSrc)
+	meta, err := d.Probe(pngSrc)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("decoded %dx%d (%s)\n", meta.Width, meta.Height, d.Version())
-	_ = dst // *image.RGBA with decoded pixels
+	if err := d.Reserve(int(meta.Stride)*int(meta.Height), len(pngSrc)); err != nil {
+		panic(err)
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+	meta, err = d.DecodeRGBA(dst, pngSrc)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("decoded %dx%d format=0x%08X (%s)\n",
+		meta.Width, meta.Height, meta.Format, d.Version())
+	_ = dst // *image.RGBA; Pix aliases the wasm dst slot until copied out
 }
 ```
 
-Pass `dst` with `Rect` at `(0,0,0,0)` and empty `Pix` to let the decoder size the image. For large inputs, call `Reserve` on the decoder first to grow wasm memory slots:
+Call `Probe` first, then `Reserve` from `Meta.Stride*Meta.Height`, then
+`DecodeRGBA` with an empty `Rect`. Skip `Probe` only if dimensions are already
+known.
 
-```go
-d := wuffs.New()
-if err := d.Reserve(4*1024*1024, len(pngSrc)); err != nil {
-	return err
-}
-```
+If `src` is larger than the default 64 KiB src cap, call `Reserve` before
+`Probe` as well (`Probe` uses the same src-cap check as `DecodeRGBA`). Empty
+`Rect` without a prior `Reserve` is a fallback: `DecodeRGBA` may return
+`*DstTooSmallError`; grow the dst slot and retry.
 
 ## API
 
-| Symbol                                            | Description                                                      |
-| ------------------------------------------------- | ---------------------------------------------------------------- |
-| `New()`                                           | Construct a decoder (initializes the wasm guest).                |
-| `(*Decoder) DecodeRGBA(dst, src)`                 | Decode a supported image into `dst`; returns `*Meta` on success. |
-| `(*Decoder) Reserve(dstBytes, srcBytes)`          | Grow wasm src/dst slots before decode.                           |
-| `(*Decoder) Version()` / `VersionNum()`           | Embedded Wuffs library version.                                  |
-| `ErrUnknownFormat`, `ErrSrcTooLarge`, `ErrDecode` | Sentinel errors.                                                 |
-| `*DstTooSmallError`                               | Structured error with required buffer size and image dimensions. |
+| Symbol                                            | Description                                                                 |
+| ------------------------------------------------- | --------------------------------------------------------------------------- |
+| `New()`                                           | Construct a decoder (initializes the wasm guest).                           |
+| `(*Decoder) Probe(src)`                           | Dimensions and format without decoding pixels; returns `*Meta`.             |
+| `(*Decoder) DecodeRGBA(dst, src)`                 | Decode a supported image into `dst`; returns `*Meta` on success.            |
+| `(*Decoder) Reserve(dstBytes, srcBytes)`          | Grow wasm src/dst slots before Probe or decode.                             |
+| `(*Decoder) Version()` / `VersionNum()`           | Embedded Wuffs library version.                                             |
+| `Meta`, `FormatPNG`, `FormatWEBP`                 | Decode metadata; FourCC constants for probed/decoded format.                |
+| `ErrUnknownFormat`, `ErrSrcTooLarge`, `ErrDecode` | Sentinel errors.                                                            |
+| `*DstTooSmallError`                               | Structured error with required buffer size and image dimensions (fallback). |
 
 A `Decoder` is not safe for concurrent use. Use one decoder per goroutine, or serialize access.
 
