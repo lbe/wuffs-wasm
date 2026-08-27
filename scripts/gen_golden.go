@@ -23,10 +23,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
 	d := wuffs.New()
 
-	meta, err := d.DecodeRGBA(dst, pngSrc)
+	meta, err := d.Probe(pngSrc)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Probe: %v\n", err)
+		os.Exit(1)
+	}
+	if meta == nil {
+		fmt.Fprintln(os.Stderr, "Probe returned nil Meta")
+		os.Exit(1)
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, int(meta.Width), int(meta.Height)))
+	if err = d.Reserve(int(meta.Stride)*int(meta.Height), len(pngSrc)); err != nil {
+		fmt.Fprintf(os.Stderr, "RequiredReserve: %v\n", err)
+		os.Exit(1)
+	}
+
+	meta, err = d.DecodeRGBA(dst, pngSrc)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "DecodeRGBA: %v\n", err)
 		os.Exit(1)

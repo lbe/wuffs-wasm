@@ -10,9 +10,11 @@ import (
 )
 
 // benchDecodeRGBA benchmarks PNG decode of the named fixture into an RGBA
-// image of the given decoded size (width×height×4). It sizes the decoder's
-// wasm slots via RequiredReserve before the timed loop.
-func benchDecodeRGBA(b *testing.B, pngPath string, dstBytes int) {
+// image of the given decoded size (width×height). It allocates one correctly
+// sized destination outside the timed loop, sizes the decoder's wasm slots
+// via RequiredReserve before the timer, and reuses the same destination for
+// every iteration so allocations occur only in setup.
+func benchDecodeRGBA(b *testing.B, pngPath string, width, height int) {
 	pngSrc, err := os.ReadFile(pngPath)
 	if err != nil {
 		b.Fatalf("reading %s: %v", pngPath, err)
@@ -20,14 +22,15 @@ func benchDecodeRGBA(b *testing.B, pngPath string, dstBytes int) {
 
 	d := New()
 	srcBytes := len(pngSrc)
-	if resErr := RequiredReserve(d, dstBytes, srcBytes); resErr != nil {
+	if resErr := RequiredReserve(d, width*height*4, srcBytes); resErr != nil {
 		b.Fatalf("RequiredReserve: %v", resErr)
 	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
 		if _, err := d.DecodeRGBA(dst, pngSrc); err != nil {
 			b.Fatalf("DecodeRGBA: %v", err)
 		}
@@ -37,13 +40,13 @@ func benchDecodeRGBA(b *testing.B, pngPath string, dstBytes int) {
 // BenchmarkDecodeRGBA_PNG_Harvesters benchmarks PNG decode for the large
 // harvesters.png fixture (1165×859 RGBA, ~1.99 MB src, ~4 MiB dst).
 func BenchmarkDecodeRGBA_PNG_Harvesters(b *testing.B) {
-	benchDecodeRGBA(b, filepath.Join("testdata", "harvesters.png"), 1165*859*4)
+	benchDecodeRGBA(b, filepath.Join("testdata", "harvesters.png"), 1165, 859)
 }
 
 // BenchmarkDecodeRGBA_PNG_BricksColor benchmarks PNG decode for the smaller
 // bricks-color.png fixture (160×120 RGBA).
 func BenchmarkDecodeRGBA_PNG_BricksColor(b *testing.B) {
-	benchDecodeRGBA(b, filepath.Join("testdata", "bricks-color.png"), 160*120*4)
+	benchDecodeRGBA(b, filepath.Join("testdata", "bricks-color.png"), 160, 120)
 }
 
 // benchStdlibPNG benchmarks image/png.Decode for a PNG fixture. The file is

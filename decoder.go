@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"math"
 
 	wasihost "github.com/lbe/wasm2go-wasi-host"
 	"github.com/lbe/wuffs-wasm/internal/wuffswasm"
@@ -63,27 +64,31 @@ func (d *Decoder) checkSrcCapacity(src []byte) error {
 	return nil
 }
 
-// DecodeRGBA decodes src (e.g. PNG or WEBP) into the pre-allocated dst.
-// If dst.Rect has zero bounds, the host performs no pre-check and the guest
-// determines image dimensions. If dst.Rect has Dx>0 && Dy>0 and
-// len(dst.Pix) is insufficient, a DstTooSmallError is returned before
-// calling the guest.
+// DecodeRGBA decodes src (e.g. PNG or WEBP) into the caller-owned dst.
 //
-// On success the returned Meta carries the decoded image dimensions and
-// pixel format.
+// The caller must pre-allocate dst with Rect, Stride, and Pix set to the
+// decoded canvas: Probe for Width x Height (or use known dimensions), Rect.Min
+// must be (0,0), Stride must be >= Dx*4, and len(Pix) must be >= Stride*Dy.
+//
+// On success pixels are written into the caller's Pix; the library never
+// allocates or replaces Pix and never points Pix at wasm memory. The wasm
+// destination slot is scratch only: the guest decodes BGRA bytes there and the
+// host converts them into dst.Pix.
+//
+// Errors:
+//   - ErrBadImage for a malformed or incompatible destination shape: an empty
+//     rectangle, nil or empty Pix, non-zero Rect.Min, a decoded dimension
+//     mismatch, or an unrepresentable host layout (e.g. a row stride that
+//     overflows uint32).
+//   - *DstTooSmallError (matching ErrDstTooSmall) when dimensions match but
+//     Stride < Dx*4 or len(Pix) < Stride*Dy.
+//
+// The returned Meta carries the decoded image dimensions and pixel format.
 func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 	// Host pre-check: reject src that exceeds the src-slot capacity before
 	// any guest call. Callers can raise the cap via Reserve.
 	if err := d.checkSrcCapacity(src); err != nil {
 		return nil, err
-	}
-
-	// Host pre-check: if caller set a non-zero Rect, Pix must be large enough.
-	if dst.Rect.Dx() > 0 && dst.Rect.Dy() > 0 {
-		minBytes := dst.Stride * dst.Rect.Dy()
-		if len(dst.Pix) < minBytes {
-			return nil, &DstTooSmallError{MinBytes: uint32(minBytes)}
-		}
 	}
 
 	// Reserve wasm memory for src, dst, and meta slots. Grow from the current
@@ -135,18 +140,61 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 	width := int(decMeta.Width)
 	height := int(decMeta.Height)
 
-	// Set destination image dimensions and point Pix directly at the guest dst
-	// slot in wasm linear memory. Slicing to the exact decoded size avoids a
-	// per-decode heap allocation for the pixel buffer. The in-place BGRA→RGBA
-	// conversion reads each pixel before writing it back, so sharing src and dst
-	// is safe.
-	dst.Rect = image.Rect(0, 0, width, height)
-	dst.Stride = width * 4
-	pixLen := uint32(width * height * 4)
-	dst.Pix = memBytes[lay.DstOff : lay.DstOff+pixLen]
+	// Validate the caller-owned destination against the decoded dimensions.
+	// The caller's Pix, Rect, and Stride are never modified on the success
+	// path; mismatches are returned as errors instead.
+	if dst.Rect.Dx() == 0 || dst.Rect.Dy() == 0 {
+		return nil, ErrBadImage
+	}
+	if len(dst.Pix) == 0 {
+		return nil, ErrBadImage
+	}
+	if dst.Rect.Min != (image.Point{}) {
+		return nil, ErrBadImage
+	}
+	if dst.Rect.Dx() != width || dst.Rect.Dy() != height {
+		return nil, ErrBadImage
+	}
 
-	// Convert BGRA premultiplied → straight RGBA in place.
-	convertBGRAtoRGBA(dst.Pix, dst.Stride, dst.Pix, width, height)
+	// Required tight row stride in bytes (width*4). width <= 0xFFFFFF, so this
+	// fits uint32, but the product with height is checked below.
+	rowBytes := width * 4
+	if uint64(rowBytes)*uint64(height) > math.MaxUint32 {
+		return nil, ErrBadImage
+	}
+	if dst.Stride < rowBytes {
+		return nil, &DstTooSmallError{
+			MinBytes: uint32(uint64(rowBytes) * uint64(height)),
+			Width:    uint32(width),
+			Height:   uint32(height),
+			Stride:   uint32(rowBytes),
+		}
+	}
+	// Pix length check: required bytes must fit uint32 and be present.
+	totalPix := uint64(dst.Stride) * uint64(height)
+	if totalPix > math.MaxUint32 {
+		return nil, ErrBadImage
+	}
+	if uint64(len(dst.Pix)) < totalPix {
+		return nil, &DstTooSmallError{
+			MinBytes: uint32(totalPix),
+			Width:    uint32(width),
+			Height:   uint32(height),
+			Stride:   uint32(dst.Stride),
+		}
+	}
+
+	// Slice the guest destination slot as read-only source scratch for the
+	// decoded width*height*4 BGRA bytes, then convert into the caller's Pix.
+	// Form the decoded length in uint64 and check it once before casting so the
+	// checked value is the single source of truth (no recomputed int product).
+	decodedBytes := uint64(width) * uint64(height) * 4
+	if decodedBytes > math.MaxUint32 {
+		return nil, ErrBadImage
+	}
+	pixLen := uint32(decodedBytes)
+	wasmBGRA := memBytes[lay.DstOff : lay.DstOff+pixLen]
+	convertBGRAtoRGBA(dst.Pix, dst.Stride, wasmBGRA, width, height)
 
 	d.lastMeta = decMeta
 	return &d.lastMeta, nil

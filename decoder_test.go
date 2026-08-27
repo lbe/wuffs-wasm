@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/lbe/wuffs-wasm"
 )
@@ -28,6 +29,19 @@ func loadFixture(t *testing.T, name string) []byte {
 		t.Fatalf("reading testdata/%s: %v", name, err)
 	}
 	return data
+}
+
+// anyNonZeroPixels reports whether dst contains at least one non-zero pixel.
+func anyNonZeroPixels(t *testing.T, dst *image.RGBA) bool {
+	t.Helper()
+	for y := 0; y < dst.Rect.Dy(); y++ {
+		for x := 0; x < dst.Rect.Dx(); x++ {
+			if c := dst.RGBAAt(x, y); c != (color.RGBA{}) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TestIntegrationVersion verifies that the decoder reports the embedded
@@ -65,9 +79,10 @@ func TestIntegrationFixturesPresent(t *testing.T) {
 }
 
 // TestIntegrationDecodeRGBA_PNG verifies that DecodeRGBA decodes
-// testdata/bricks-color.png (160×120) into a pre-allocated image.RGBA
-// with correct dimensions, that an undersized destination triggers
-// DstTooSmallError, and that the same Decoder can decode twice.
+// testdata/bricks-color.png (160×120) into a caller-owned, correctly sized
+// image.RGBA, that an undersized destination triggers DstTooSmallError, that
+// the caller's Pix/Rect/Stride are never mutated, and that the same Decoder
+// can decode into the same destination twice.
 func TestIntegrationDecodeRGBA_PNG(t *testing.T) {
 	pngSrc := loadFixture(t, "bricks-color.png")
 
@@ -84,8 +99,8 @@ func TestIntegrationDecodeRGBA_PNG(t *testing.T) {
 	t.Run("undersized Pix returns DstTooSmallError", func(t *testing.T) {
 		d := wuffs.New()
 
-		// Caller sets a non-zero Rect (Dx>0, Dy>0) but provides Pix that is
-		// far too small. The host pre-check must reject before guest call.
+		// Caller sets a correctly sized Rect but provides Pix that is far too
+		// small. The host validation must reject it after decode.
 		dst := &image.RGBA{
 			Rect:   image.Rect(0, 0, wantW, wantH),
 			Stride: wantW * 4,
@@ -100,13 +115,26 @@ func TestIntegrationDecodeRGBA_PNG(t *testing.T) {
 		if !errors.As(err, &dstErr) {
 			t.Fatalf("expected *DstTooSmallError, got %T: %v", err, err)
 		}
+		if dstErr.MinBytes != uint32(wantW*wantH*4) {
+			t.Errorf("DstTooSmallError.MinBytes = %d, want %d", dstErr.MinBytes, wantW*wantH*4)
+		}
+		if dstErr.Width != wantW {
+			t.Errorf("DstTooSmallError.Width = %d, want %d", dstErr.Width, wantW)
+		}
+		if dstErr.Height != wantH {
+			t.Errorf("DstTooSmallError.Height = %d, want %d", dstErr.Height, wantH)
+		}
+		if dstErr.Stride != uint32(wantW*4) {
+			t.Errorf("DstTooSmallError.Stride = %d, want %d", dstErr.Stride, wantW*4)
+		}
 	})
 
 	t.Run("repeated decode succeeds", func(t *testing.T) {
 		d := wuffs.New()
 
+		// One correctly sized destination reused across both iterations.
+		dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
 		for i := 0; i < 2; i++ {
-			dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
 			meta, err := d.DecodeRGBA(dst, pngSrc)
 			if err != nil {
 				t.Fatalf("iteration %d: DecodeRGBA: %v", i, err)
@@ -122,11 +150,363 @@ func TestIntegrationDecodeRGBA_PNG(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("Pix/Rect/Stride identity preserved", func(t *testing.T) {
+		d := wuffs.New()
+		if resErr := wuffs.RequiredReserve(d, wantW*wantH*4, len(pngSrc)); resErr != nil {
+			t.Fatalf("RequiredReserve: %v", resErr)
+		}
+
+		dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
+
+		// Capture destination identity before decode.
+		ptr := unsafe.SliceData(dst.Pix)
+		ln := len(dst.Pix)
+		cp := cap(dst.Pix)
+		rect := dst.Rect
+		stride := dst.Stride
+
+		meta, err := d.DecodeRGBA(dst, pngSrc)
+		if err != nil {
+			t.Fatalf("DecodeRGBA: %v", err)
+		}
+		if meta == nil {
+			t.Fatal("DecodeRGBA returned nil Meta")
+		}
+
+		// Assert identity after the first decode.
+		if unsafe.SliceData(dst.Pix) != ptr {
+			t.Error("dst.Pix data pointer changed after decode")
+		}
+		if len(dst.Pix) != ln {
+			t.Errorf("len(dst.Pix) = %d, want %d", len(dst.Pix), ln)
+		}
+		if cap(dst.Pix) != cp {
+			t.Errorf("cap(dst.Pix) = %d, want %d", cap(dst.Pix), cp)
+		}
+		if dst.Rect != rect {
+			t.Errorf("dst.Rect = %v, want %v", dst.Rect, rect)
+		}
+		if dst.Stride != stride {
+			t.Errorf("dst.Stride = %d, want %d", dst.Stride, stride)
+		}
+		// Decode must have produced pixels in the caller's buffer.
+		if !anyNonZeroPixels(t, dst) {
+			t.Error("decoded image is entirely zero; expected non-zero pixels")
+		}
+
+		// Decode a second time into the same destination.
+		meta2, err2 := d.DecodeRGBA(dst, pngSrc)
+		if err2 != nil {
+			t.Fatalf("second DecodeRGBA: %v", err2)
+		}
+		if meta2 == nil {
+			t.Fatal("second DecodeRGBA returned nil Meta")
+		}
+		if unsafe.SliceData(dst.Pix) != ptr {
+			t.Error("dst.Pix data pointer changed after second decode")
+		}
+		if len(dst.Pix) != ln {
+			t.Errorf("len(dst.Pix) after second decode = %d, want %d", len(dst.Pix), ln)
+		}
+		if cap(dst.Pix) != cp {
+			t.Errorf("cap(dst.Pix) after second decode = %d, want %d", cap(dst.Pix), cp)
+		}
+		if dst.Rect != rect {
+			t.Errorf("dst.Rect after second decode = %v, want %v", dst.Rect, rect)
+		}
+		if dst.Stride != stride {
+			t.Errorf("dst.Stride after second decode = %d, want %d", dst.Stride, stride)
+		}
+	})
+}
+
+// TestIntegrationDecodeRGBA_PaddedStride verifies that a destination with
+// Stride > width*4 places every decoded row at dst.Stride, preserves the
+// padding bytes, and leaves the caller's Pix, Rect, and Stride unchanged. It
+// must fail if convert advances destination rows by width*4 instead of
+// dst.Stride.
+func TestIntegrationDecodeRGBA_PaddedStride(t *testing.T) {
+	pngSrc := loadFixture(t, "bricks-color.png")
+
+	const (
+		wantW  = 160
+		wantH  = 120
+		pad    = 16
+		stride = wantW*4 + pad
+	)
+
+	d := wuffs.New()
+	if resErr := wuffs.RequiredReserve(d, stride*wantH, len(pngSrc)); resErr != nil {
+		t.Fatalf("RequiredReserve: %v", resErr)
+	}
+
+	dst := &image.RGBA{
+		Rect:   image.Rect(0, 0, wantW, wantH),
+		Stride: stride,
+		Pix:    make([]byte, stride*wantH),
+	}
+
+	// Save the padding tail of every row so we can prove it is untouched.
+	savedPad := make([][]byte, wantH)
+	for r := 0; r < wantH; r++ {
+		off := r*stride + wantW*4
+		savedPad[r] = append([]byte(nil), dst.Pix[off:off+pad]...)
+	}
+
+	// Capture identity before decode.
+	ptr := unsafe.SliceData(dst.Pix)
+	ln := len(dst.Pix)
+	cp := cap(dst.Pix)
+	rect := dst.Rect
+	st := dst.Stride
+
+	meta, err := d.DecodeRGBA(dst, pngSrc)
+	if err != nil {
+		t.Fatalf("DecodeRGBA: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("DecodeRGBA returned nil Meta")
+	}
+	if got := int(meta.Width); got != wantW {
+		t.Errorf("Meta.Width = %d, want %d", got, wantW)
+	}
+	if got := int(meta.Height); got != wantH {
+		t.Errorf("Meta.Height = %d, want %d", got, wantH)
+	}
+
+	// Decode a tight (no padding) destination to obtain the expected pixels.
+	tight := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
+	if resErr := wuffs.RequiredReserve(d, wantW*wantH*4, len(pngSrc)); resErr != nil {
+		t.Fatalf("RequiredReserve (tight): %v", resErr)
+	}
+	tMeta, tErr := d.DecodeRGBA(tight, pngSrc)
+	if tErr != nil {
+		t.Fatalf("tight DecodeRGBA: %v", tErr)
+	}
+	if tMeta == nil {
+		t.Fatal("tight DecodeRGBA returned nil Meta")
+	}
+
+	for r := 0; r < wantH; r++ {
+		got := dst.Pix[r*stride : r*stride+wantW*4]
+		want := tight.Pix[r*tight.Stride : r*tight.Stride+wantW*4]
+		if !bytes.Equal(got, want) {
+			t.Errorf("row %d: padded decode differs from tight decode", r)
+		}
+		// Padding tail must be unchanged.
+		off := r*stride + wantW*4
+		if !bytes.Equal(dst.Pix[off:off+pad], savedPad[r]) {
+			t.Errorf("row %d: padding bytes changed after decode", r)
+		}
+	}
+
+	// Identity must be preserved.
+	if unsafe.SliceData(dst.Pix) != ptr {
+		t.Error("dst.Pix data pointer changed after decode")
+	}
+	if len(dst.Pix) != ln {
+		t.Errorf("len(dst.Pix) = %d, want %d", len(dst.Pix), ln)
+	}
+	if cap(dst.Pix) != cp {
+		t.Errorf("cap(dst.Pix) = %d, want %d", cap(dst.Pix), cp)
+	}
+	if dst.Rect != rect {
+		t.Errorf("dst.Rect = %v, want %v", dst.Rect, rect)
+	}
+	if dst.Stride != st {
+		t.Errorf("dst.Stride = %d, want %d", dst.Stride, st)
+	}
+}
+
+// TestIntegrationDecodeRGBA_UnrepresentableHostLayout proves that a valid
+// decoded rectangle with a very large positive Stride whose required byte
+// count cannot be represented by DstTooSmallError.MinBytes (uint32) returns
+// ErrBadImage without panicking, overflowing, or truncating a structured error.
+func TestIntegrationDecodeRGBA_UnrepresentableHostLayout(t *testing.T) {
+	pngSrc := loadFixture(t, "bricks-color.png")
+
+	const (
+		wantW = 160
+		wantH = 120
+	)
+
+	// A stride large enough that Stride*Height exceeds uint32. Skip only when
+	// int cannot represent such a stride on this platform.
+	const hugeStride = int(1) << 30
+	if hugeStride <= 0 || hugeStride*wantH < 0 {
+		t.Skipf("int cannot represent stride %d", hugeStride)
+	}
+
+	// Non-empty Pix so the empty/nil checks do not fire first.
+	dst := &image.RGBA{
+		Rect:   image.Rect(0, 0, wantW, wantH),
+		Stride: hugeStride,
+		Pix:    make([]byte, 4),
+	}
+
+	d := wuffs.New()
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("DecodeRGBA panicked: %v", r)
+			}
+		}()
+		_, err = d.DecodeRGBA(dst, pngSrc)
+	}()
+	if err == nil {
+		t.Fatal("expected error for unrepresentable host layout, got nil")
+	}
+	if !errors.Is(err, wuffs.ErrBadImage) {
+		t.Errorf("errors.Is(err, ErrBadImage) = false, want true (err = %v)", err)
+	}
+	if errors.Is(err, wuffs.ErrDstTooSmall) {
+		t.Errorf("errors.Is(err, ErrDstTooSmall) = true, want false (err = %v)", err)
+	}
+	var dstErr *wuffs.DstTooSmallError
+	if errors.As(err, &dstErr) {
+		t.Errorf("errors.As extracted *DstTooSmallError, want false (err = %v)", err)
+	}
+}
+
+// TestIntegrationDecodeRGBA_DstValidation covers each host validation branch:
+// ErrBadImage for empty/nil/empty Pix, non-zero Rect.Min, and dimension
+// mismatch; *DstTooSmallError for too-small Stride or short Pix.
+func TestIntegrationDecodeRGBA_DstValidation(t *testing.T) {
+	pngSrc := loadFixture(t, "bricks-color.png")
+
+	const (
+		wantW = 160
+		wantH = 120
+	)
+
+	t.Run("empty Rect returns ErrBadImage", func(t *testing.T) {
+		d := wuffs.New()
+		dst := &image.RGBA{Rect: image.Rect(0, 0, 0, 0)}
+		_, err := d.DecodeRGBA(dst, pngSrc)
+		if !errors.Is(err, wuffs.ErrBadImage) {
+			t.Fatalf("errors.Is(err, ErrBadImage) = false, want true (err = %v)", err)
+		}
+	})
+
+	t.Run("nil Pix returns ErrBadImage", func(t *testing.T) {
+		d := wuffs.New()
+		dst := &image.RGBA{Rect: image.Rect(0, 0, wantW, wantH), Stride: wantW * 4, Pix: nil}
+		_, err := d.DecodeRGBA(dst, pngSrc)
+		if !errors.Is(err, wuffs.ErrBadImage) {
+			t.Fatalf("errors.Is(err, ErrBadImage) = false, want true (err = %v)", err)
+		}
+	})
+
+	t.Run("empty Pix returns ErrBadImage", func(t *testing.T) {
+		d := wuffs.New()
+		dst := &image.RGBA{Rect: image.Rect(0, 0, wantW, wantH), Stride: wantW * 4, Pix: make([]byte, 0)}
+		_, err := d.DecodeRGBA(dst, pngSrc)
+		if !errors.Is(err, wuffs.ErrBadImage) {
+			t.Fatalf("errors.Is(err, ErrBadImage) = false, want true (err = %v)", err)
+		}
+	})
+
+	t.Run("non-zero Rect.Min returns ErrBadImage", func(t *testing.T) {
+		d := wuffs.New()
+		dst := &image.RGBA{
+			Rect:   image.Rect(2, 3, 2+wantW, 3+wantH),
+			Stride: wantW * 4,
+			Pix:    make([]byte, wantW*wantH*4),
+		}
+		_, err := d.DecodeRGBA(dst, pngSrc)
+		if !errors.Is(err, wuffs.ErrBadImage) {
+			t.Fatalf("errors.Is(err, ErrBadImage) = false, want true (err = %v)", err)
+		}
+	})
+
+	t.Run("wrong dimensions return ErrBadImage", func(t *testing.T) {
+		d := wuffs.New()
+		dst := &image.RGBA{
+			Rect:   image.Rect(0, 0, 100, wantH),
+			Stride: 100 * 4,
+			Pix:    make([]byte, 100*wantH*4),
+		}
+		_, err := d.DecodeRGBA(dst, pngSrc)
+		if !errors.Is(err, wuffs.ErrBadImage) {
+			t.Fatalf("errors.Is(err, ErrBadImage) = false, want true (err = %v)", err)
+		}
+	})
+
+	t.Run("too-small Stride returns DstTooSmallError", func(t *testing.T) {
+		d := wuffs.New()
+		dst := &image.RGBA{
+			Rect:   image.Rect(0, 0, wantW, wantH),
+			Stride: 1,
+			Pix:    make([]byte, wantW*wantH*4),
+		}
+		_, err := d.DecodeRGBA(dst, pngSrc)
+		if err == nil {
+			t.Fatal("expected *DstTooSmallError for too-small Stride, got nil")
+		}
+		var dstErr *wuffs.DstTooSmallError
+		if !errors.As(err, &dstErr) {
+			t.Fatalf("expected *DstTooSmallError, got %T: %v", err, err)
+		}
+		if !errors.Is(err, wuffs.ErrDstTooSmall) {
+			t.Errorf("errors.Is(err, ErrDstTooSmall) = false, want true (err = %v)", err)
+		}
+		if dstErr.MinBytes != uint32(wantW*wantH*4) {
+			t.Errorf("DstTooSmallError.MinBytes = %d, want %d", dstErr.MinBytes, wantW*wantH*4)
+		}
+		if dstErr.Width != wantW {
+			t.Errorf("DstTooSmallError.Width = %d, want %d", dstErr.Width, wantW)
+		}
+		if dstErr.Height != wantH {
+			t.Errorf("DstTooSmallError.Height = %d, want %d", dstErr.Height, wantH)
+		}
+		if dstErr.Stride != uint32(wantW*4) {
+			t.Errorf("DstTooSmallError.Stride = %d, want %d", dstErr.Stride, wantW*4)
+		}
+	})
+
+	t.Run("short Pix returns DstTooSmallError", func(t *testing.T) {
+		d := wuffs.New()
+		// Padded stride: rows are laid out Dx*4 bytes each but the destination
+		// stride is wider. Allocate Pix one byte short of the padded requirement
+		// so len(Pix) < Stride*Dy while the tight width*4 row still fits.
+		stride := wantW*4 + 8
+		dst := &image.RGBA{
+			Rect:   image.Rect(0, 0, wantW, wantH),
+			Stride: stride,
+			Pix:    make([]byte, stride*wantH-1),
+		}
+		_, err := d.DecodeRGBA(dst, pngSrc)
+		if err == nil {
+			t.Fatal("expected *DstTooSmallError for short Pix, got nil")
+		}
+		var dstErr *wuffs.DstTooSmallError
+		if !errors.As(err, &dstErr) {
+			t.Fatalf("expected *DstTooSmallError, got %T: %v", err, err)
+		}
+		if !errors.Is(err, wuffs.ErrDstTooSmall) {
+			t.Errorf("errors.Is(err, ErrDstTooSmall) = false, want true (err = %v)", err)
+		}
+		if dstErr.MinBytes != uint32(stride*wantH) {
+			t.Errorf("DstTooSmallError.MinBytes = %d, want %d", dstErr.MinBytes, stride*wantH)
+		}
+		if dstErr.Width != wantW {
+			t.Errorf("DstTooSmallError.Width = %d, want %d", dstErr.Width, wantW)
+		}
+		if dstErr.Height != wantH {
+			t.Errorf("DstTooSmallError.Height = %d, want %d", dstErr.Height, wantH)
+		}
+		if dstErr.Stride != uint32(stride) {
+			t.Errorf("DstTooSmallError.Stride = %d, want %d", dstErr.Stride, stride)
+		}
+	})
 }
 
 // TestIntegrationReserveRetry verifies that a guest DstTooSmallError surfaces
 // the decoded image dimensions from the guest meta slot, and that the caller
-// can reserve a larger destination slot and retry successfully.
+// can reserve a larger destination slot and retry successfully into a
+// correctly sized host destination.
 func TestIntegrationReserveRetry(t *testing.T) {
 	pngSrc := loadFixture(t, "bricks-color.png")
 
@@ -144,7 +524,15 @@ func TestIntegrationReserveRetry(t *testing.T) {
 	defer restore()
 
 	d := wuffs.New()
-	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+	// Correctly sized host destination; the guest dst slot is what is too small.
+	dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
+
+	// Capture caller-owned destination properties before the failing decode.
+	wantPixPtr := unsafe.SliceData(dst.Pix)
+	wantPixLen := len(dst.Pix)
+	wantPixCap := cap(dst.Pix)
+	wantRect := dst.Rect
+	wantStrideInt := dst.Stride
 
 	// First decode attempt: the guest destination slot is too small.
 	_, err := d.DecodeRGBA(dst, pngSrc)
@@ -167,6 +555,16 @@ func TestIntegrationReserveRetry(t *testing.T) {
 	if dstErr.Stride != wantStride {
 		t.Errorf("DstTooSmallError.Stride = %d, want %d", dstErr.Stride, wantStride)
 	}
+	// The failed decode must not have perturbed the caller-owned destination.
+	if got := unsafe.SliceData(dst.Pix); got != wantPixPtr {
+		t.Errorf("Pix pointer changed after failure: %p -> %p", wantPixPtr, got)
+	}
+	if len(dst.Pix) != wantPixLen || cap(dst.Pix) != wantPixCap {
+		t.Errorf("Pix len/cap changed after failure: len %d->%d cap %d->%d", wantPixLen, len(dst.Pix), wantPixCap, cap(dst.Pix))
+	}
+	if dst.Rect != wantRect || dst.Stride != wantStrideInt {
+		t.Errorf("Rect/Stride changed after failure: %v/%d -> %v/%d", wantRect, wantStrideInt, dst.Rect, dst.Stride)
+	}
 
 	// Reserve a destination slot large enough for the decoded image and retry.
 	if resErr := wuffs.RequiredReserve(d, wantW*wantH*4, len(pngSrc)); resErr != nil {
@@ -185,11 +583,20 @@ func TestIntegrationReserveRetry(t *testing.T) {
 	if meta.Height != wantH {
 		t.Errorf("retry Meta.Height = %d, want %d", meta.Height, wantH)
 	}
-	if got := dst.Rect.Dx(); got != wantW {
-		t.Errorf("retry dst.Rect.Dx() = %d, want %d", got, wantW)
+	// Pixel identity: the caller's Pix must now hold non-zero decoded data.
+	if !anyNonZeroPixels(t, dst) {
+		t.Error("retry decode produced zero pixels")
 	}
-	if got := dst.Rect.Dy(); got != wantH {
-		t.Errorf("retry dst.Rect.Dy() = %d, want %d", got, wantH)
+	// The successful retry must reuse the very same destination: pointer, len,
+	// cap, Rect, and Stride are all unchanged by the decode (only pixels differ).
+	if got := unsafe.SliceData(dst.Pix); got != wantPixPtr {
+		t.Errorf("Pix pointer changed after retry: %p -> %p", wantPixPtr, got)
+	}
+	if len(dst.Pix) != wantPixLen || cap(dst.Pix) != wantPixCap {
+		t.Errorf("Pix len/cap changed after retry: len %d->%d cap %d->%d", wantPixLen, len(dst.Pix), wantPixCap, cap(dst.Pix))
+	}
+	if dst.Rect != wantRect || dst.Stride != wantStrideInt {
+		t.Errorf("Rect/Stride changed after retry: %v/%d -> %v/%d", wantRect, wantStrideInt, dst.Rect, dst.Stride)
 	}
 }
 
@@ -207,7 +614,11 @@ func TestBenchmarkPNGBaselineRecord(t *testing.T) {
 	d := wuffs.New()
 
 	// harvesters.png is 1165×859 RGBA → ~4 MiB decoded.
-	const dstBytes = 1165 * 859 * 4
+	const (
+		wantW    = 1165
+		wantH    = 859
+		dstBytes = wantW * wantH * 4
+	)
 	srcBytes := len(pngSrc)
 
 	// Reserve memory using the test helper with explicit sizes.
@@ -222,8 +633,8 @@ func TestBenchmarkPNGBaselineRecord(t *testing.T) {
 		meta *wuffs.Meta
 		err  error
 	)
+	dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
 	for i := 0; i < iterations; i++ {
-		dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
 		meta, err = d.DecodeRGBA(dst, pngSrc)
 		if err != nil {
 			t.Fatalf("DecodeRGBA iteration %d: %v", i, err)
@@ -322,7 +733,7 @@ func TestIntegrationProbe_PNG(t *testing.T) {
 	}
 
 	// DecodeRGBA then Probe again on the same Decoder.
-	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+	dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
 	if _, decErr := d.DecodeRGBA(dst, pngSrc); decErr != nil {
 		t.Fatalf("DecodeRGBA: %v", decErr)
 	}
@@ -420,7 +831,8 @@ func TestIntegrationProbe_SentinelErrors(t *testing.T) {
 	}
 
 	// Shrunk-dst block: Probe must not grow the dst slot, and a subsequent
-	// DecodeRGBA with an empty Rect must still surface DstTooSmallError.
+	// DecodeRGBA with a correctly sized host destination must still surface
+	// DstTooSmallError from the guest scratch path.
 	t.Run("shrunk dst slot Probe does not grow dst", func(t *testing.T) {
 		restore := wuffs.SetInitialDstSlotBytes(1024)
 		defer restore()
@@ -447,10 +859,10 @@ func TestIntegrationProbe_SentinelErrors(t *testing.T) {
 			t.Errorf("MemoryLayout().DstLen = %d, want 1024", got)
 		}
 
-		// Same Decoder, empty Rect, no Reserve: DecodeRGBA must return
-		// *DstTooSmallError (1024-byte dst slot is still too small).
-		empty := &image.RGBA{Rect: image.Rect(0, 0, 0, 0)}
-		_, decErr := d.DecodeRGBA(empty, pngSrc)
+		// Same Decoder, correctly sized host dst, no Reserve: DecodeRGBA must
+		// return *DstTooSmallError (1024-byte guest dst slot is still too small).
+		dst := image.NewRGBA(image.Rect(0, 0, 160, 120))
+		_, decErr := d.DecodeRGBA(dst, pngSrc)
 		if decErr == nil {
 			t.Fatal("DecodeRGBA() after Probe error = nil, want *DstTooSmallError")
 		}
@@ -463,15 +875,15 @@ func TestIntegrationProbe_SentinelErrors(t *testing.T) {
 // TestIntegrationProbeThenDecodeRGBA_PNG verifies the composed workflow of
 // probing a PNG for its dimensions/stride and then decoding it via DecodeRGBA
 // using the stride reported by Probe to size the destination slot. It asserts
-// the decoded dimensions match the probed dimensions and that the decoded
-// pixel CRC32 matches the checked-in golden value.
+// the decoded dimensions match the probed dimensions, that the decoded pixel
+// CRC32 matches the checked-in golden value, and that later Probe and Reserve
+// calls cannot mutate the already-decoded host pixels.
 func TestIntegrationProbeThenDecodeRGBA_PNG(t *testing.T) {
 	restore := wuffs.SetInitialDstSlotBytes(1024)
 	defer restore()
 
 	d := wuffs.New()
 
-	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
 	pngSrc := loadFixture(t, "bricks-color.png")
 
 	meta, err := d.Probe(pngSrc)
@@ -497,6 +909,7 @@ func TestIntegrationProbeThenDecodeRGBA_PNG(t *testing.T) {
 	// Size the dst slot using the Stride from Probe (same bytes as 160*120*4).
 	wuffs.RequiredReserve(d, int(meta.Stride)*int(meta.Height), len(pngSrc))
 
+	dst := image.NewRGBA(image.Rect(0, 0, 160, 120))
 	meta2, err := d.DecodeRGBA(dst, pngSrc)
 	if err != nil {
 		t.Fatalf("DecodeRGBA: %v", err)
@@ -521,6 +934,24 @@ func TestIntegrationProbeThenDecodeRGBA_PNG(t *testing.T) {
 
 	if gotCRC != uint32(wantCRC) {
 		t.Errorf("CRC32 of decoded Pix = 0x%08X, want 0x%08X", gotCRC, uint32(wantCRC))
+	}
+
+	// Persistence: copy decoded host pixels and prove later Probe/Reserve
+	// cannot mutate them.
+	cp := append([]byte(nil), dst.Pix...)
+
+	if _, err := d.Probe(pngSrc); err != nil {
+		t.Fatalf("Probe after decode: %v", err)
+	}
+	if !bytes.Equal(cp, dst.Pix) {
+		t.Error("Probe mutated decoded host pixels")
+	}
+
+	if err := wuffs.RequiredReserve(d, 160*120*4, len(pngSrc)); err != nil {
+		t.Fatalf("RequiredReserve after decode: %v", err)
+	}
+	if !bytes.Equal(cp, dst.Pix) {
+		t.Error("Reserve mutated decoded host pixels")
 	}
 }
 
@@ -572,7 +1003,7 @@ func TestIntegrationProbe_WEBP(t *testing.T) {
 func TestIntegrationDecodeRGBA_PNGGolden(t *testing.T) {
 	pngSrc := loadFixture(t, "bricks-color.png")
 
-	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+	dst := image.NewRGBA(image.Rect(0, 0, 160, 120))
 	d := wuffs.New()
 
 	meta, err := d.DecodeRGBA(dst, pngSrc)
@@ -657,7 +1088,7 @@ func TestIntegrationDecodeRGBA_SentinelErrors(t *testing.T) {
 			}
 
 			d := wuffs.New()
-			dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+			dst := image.NewRGBA(image.Rect(0, 0, 160, 120))
 			_, err := d.DecodeRGBA(dst, tc.src)
 			if !errors.Is(err, tc.want) {
 				t.Errorf("DecodeRGBA() error = %v, want errors.Is(err, %v) to be true", err, tc.want)
@@ -668,50 +1099,58 @@ func TestIntegrationDecodeRGBA_SentinelErrors(t *testing.T) {
 
 // TestIntegrationDecodeRGBA_AllocsPerRun measures the number of heap allocations
 // per DecodeRGBA call on bricks-color.png after RequiredReserve has sized the
-// wasm memory slots. The target is zero heap allocations on the hot path.
-// Exceeding the documented ceiling is a gate failure.
-//
-// wasm2go ceiling: update the const below on first green run with the observed
-// baseline alloc count from testing.AllocsPerRun.
+// wasm memory slots and a warm-up decode has been performed. The target is
+// exactly zero heap allocations on the hot path: the destination is allocated
+// once outside the timed loop and reused.
 func TestIntegrationDecodeRGBA_AllocsPerRun(t *testing.T) {
 	pngSrc := loadFixture(t, "bricks-color.png")
 
 	d := wuffs.New()
 
 	// Size reserve for the bricks-color.png fixture: 160×120 RGBA.
-	const dstBytes = 160 * 120 * 4
+	const (
+		wantW    = 160
+		wantH    = 120
+		dstBytes = wantW * wantH * 4
+	)
 	srcBytes := len(pngSrc)
 	if resErr := wuffs.RequiredReserve(d, dstBytes, srcBytes); resErr != nil {
 		t.Fatalf("RequiredReserve: %v", resErr)
 	}
 
-	// wasm2go ceiling: 1 alloc per decode after Reserve. The single allocation
-	// is the image.NewRGBA struct itself; DecodeRGBA no longer allocates Pix or
-	// Meta on the hot path. Observed baseline on first green run.
-	const allocCeiling = 1
+	// One correctly sized destination, allocated outside the timed loop.
+	dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
+
+	// Warm up so any one-time setup (e.g. d.lastMeta aliasing) is complete
+	// before measurement.
+	if _, err := d.DecodeRGBA(dst, pngSrc); err != nil {
+		t.Fatalf("warm-up DecodeRGBA: %v", err)
+	}
 
 	allocs := testing.AllocsPerRun(5, func() {
-		dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
 		if _, err := d.DecodeRGBA(dst, pngSrc); err != nil {
 			t.Errorf("DecodeRGBA: %v", err)
 		}
 	})
 
-	t.Logf("allocs per DecodeRGBA: %.0f (ceiling: %d)", allocs, allocCeiling)
+	t.Logf("allocs per DecodeRGBA: %.0f (target: 0)", allocs)
 
-	if allocs > allocCeiling {
-		t.Errorf("DecodeRGBA allocated %.0f heap objects per run, want ≤ %d", allocs, allocCeiling)
+	if allocs != 0 {
+		t.Errorf("DecodeRGBA allocated %.0f heap objects per run, want 0", allocs)
 	}
 }
 
-// decodePreallocatedRGBA decodes src into a pre-allocated image.RGBA with zero
-// bounds (empty Rect), asserting that the guest fills the dimensions to
-// wantW×wantH and that decode produced at least one non-zero pixel. It returns
-// the decoder's Meta on success.
+// decodePreallocatedRGBA decodes src into a caller-owned image.RGBA sized to
+// wantW×wantH, reserving guest scratch, asserting that decode produced the
+// expected dimensions and at least one non-zero pixel. It returns the
+// decoder's Meta on success.
 func decodePreallocatedRGBA(t *testing.T, d *wuffs.Decoder, src []byte, wantW, wantH int) *wuffs.Meta {
 	t.Helper()
 
-	dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+	dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
+	if resErr := wuffs.RequiredReserve(d, wantW*wantH*4, len(src)); resErr != nil {
+		t.Fatalf("RequiredReserve: %v", resErr)
+	}
 
 	meta, err := d.DecodeRGBA(dst, src)
 	if err != nil {
@@ -728,25 +1167,8 @@ func decodePreallocatedRGBA(t *testing.T, d *wuffs.Decoder, src []byte, wantW, w
 		t.Errorf("Meta.Height = %d, want %d", got, wantH)
 	}
 
-	// After guest decode, dst.Rect should reflect the decoded dimensions.
-	if got := dst.Rect.Dx(); got != wantW {
-		t.Errorf("dst.Rect.Dx() = %d, want %d", got, wantW)
-	}
-	if got := dst.Rect.Dy(); got != wantH {
-		t.Errorf("dst.Rect.Dy() = %d, want %d", got, wantH)
-	}
-
 	// At least one pixel must be non-zero, proving decode produced data.
-	anyNonZero := false
-	for y := 0; y < dst.Rect.Dy() && !anyNonZero; y++ {
-		for x := 0; x < dst.Rect.Dx(); x++ {
-			if c := dst.RGBAAt(x, y); c != (color.RGBA{}) {
-				anyNonZero = true
-				break
-			}
-		}
-	}
-	if !anyNonZero {
+	if !anyNonZeroPixels(t, dst) {
 		t.Error("decoded image is entirely zero; expected non-zero pixels")
 	}
 
@@ -788,7 +1210,7 @@ func TestIntegrationDecodeRGBA_Format(t *testing.T) {
 
 			src := loadFixture(t, tc.srcFile)
 			d := wuffs.New()
-			dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+			dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
 
 			meta, err := d.DecodeRGBA(dst, src)
 			if err != nil {
@@ -817,7 +1239,7 @@ func TestIntegrationDecodeRGBA_Format(t *testing.T) {
 // TestIntegrationConcurrentDecoders verifies that two separate *Decoder
 // instances, each owning their own wasm2go module and WASI host state, can be
 // created and decode PNG images concurrently without interfering with one
-// another. Each decoder must produce the correct image dimensions.
+// another. Each decoder owns its own correctly sized destination.
 func TestIntegrationConcurrentDecoders(t *testing.T) {
 	pngSrc := loadFixture(t, "bricks-color.png")
 
@@ -840,12 +1262,12 @@ func TestIntegrationConcurrentDecoders(t *testing.T) {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					err1 = fmt.Errorf("iteration %d: decoder 1 creation/decode panicked: %v", iter, r)
+					err1 = fmt.Errorf("decoder 1 panicked: %v", r)
 				}
 			}()
 			<-start
 			d1 = wuffs.New()
-			dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+			dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
 			meta1, err1 = d1.DecodeRGBA(dst, pngSrc)
 		}(i)
 
@@ -853,12 +1275,12 @@ func TestIntegrationConcurrentDecoders(t *testing.T) {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					err2 = fmt.Errorf("iteration %d: decoder 2 creation/decode panicked: %v", iter, r)
+					err2 = fmt.Errorf("decoder 2 panicked: %v", r)
 				}
 			}()
 			<-start
 			d2 = wuffs.New()
-			dst := image.NewRGBA(image.Rect(0, 0, 0, 0))
+			dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
 			meta2, err2 = d2.DecodeRGBA(dst, pngSrc)
 		}(i)
 

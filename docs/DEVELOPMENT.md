@@ -21,10 +21,28 @@ go test -v -run TestBenchmarkPNGBaselineRecord -count=1
 - `BenchmarkStdlibPNG_*` uses `image/png.Decode` — more allocs (full decode
   allocation), but well-optimized native code.
 - `BenchmarkDecodeRGBA_PNG_*` uses the wuffs wasm guest via wasm2go —
-  minimal allocs (one `image.NewRGBA` shell per iteration), but wasm
-  execution overhead.
+  zero allocs on the hot path (the `image.RGBA` and guest scratch are
+  allocated **once** outside `b.ResetTimer` and reused for every iteration),
+  but wasm execution overhead remains.
 - Go/no-go on the wasm2go path remains a manual human decision; no
   automated perf gate is enforced.
+
+## Allocation model
+
+`DecodeRGBA` writes converted pixels into the caller's `image.RGBA.Pix`. The
+caller owns the product pixels; the wasm destination slot is scratch only. Once
+the caller has sized the destination and called `Reserve`, repeated decode into
+the same reused `dst` allocates **zero** Go heap objects — this is the verified
+hot path (`TestIntegrationDecodeRGBA_AllocsPerRun` requires 0 allocs/run,
+`BenchmarkDecodeRGBA_PNG_BricksColor` reports `0 allocs/op`). The destination
+allocation and `Reserve` are one-time setup, not part of the reusable path.
+
+> **Warning:** do not reintroduce the wasm-aliasing cheat. Earlier versions
+> assigned the wasm destination subslice to `dst.Pix` (or accepted an empty
+> `Rect` and grew a buffer internally), which made product pixels live in wasm
+> linear memory until copied out. That is not implemented here: `DecodeRGBA`
+> never replaces `dst.Pix`, never aliases wasm memory, and never accepts an
+> empty rectangle as a success path.
 
 ## Repository layout
 
