@@ -15,7 +15,6 @@ type Decoder struct {
 	module        *wuffswasm.Module
 	wasi          *wasihost.State
 	currentLayout SlotLayout
-	srcCap        int  // max src bytes DecodeRGBA accepts; grown via Reserve
 	lastMeta      Meta // reused Meta return value to avoid per-decode allocation; returned pointer aliases this field
 }
 
@@ -32,8 +31,7 @@ func New() *Decoder {
 	return &Decoder{
 		module:        module,
 		wasi:          wasi,
-		currentLayout: computeLayout(memSize, uint32(initialDstSlotBytes), maxSrc),
-		srcCap:        defaultSrcCap,
+		currentLayout: computeLayout(memSize, uint32(initialDstSlotBytes), uint32(defaultSrcCap)),
 	}
 }
 
@@ -56,9 +54,12 @@ func readMeta(mem []byte, layout SlotLayout) Meta {
 }
 
 // checkSrcCapacity rejects src larger than the reserved src-slot capacity,
-// returning ErrSrcTooLarge before any guest call. Callers raise the cap via Reserve.
+// returning ErrSrcTooLarge before any guest call. The capacity authority is
+// the decoder's currentLayout.SrcLen (grown via Reserve); there is no separate
+// capacity field. Comparing as uint64 keeps the bound correct when Go int and
+// uint32 differ in width.
 func (d *Decoder) checkSrcCapacity(src []byte) error {
-	if len(src) > d.srcCap {
+	if uint64(len(src)) > uint64(d.currentLayout.SrcLen) {
 		return ErrSrcTooLarge
 	}
 	return nil
@@ -85,26 +86,14 @@ func (d *Decoder) checkSrcCapacity(src []byte) error {
 //
 // The returned Meta carries the decoded image dimensions and pixel format.
 func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
-	// Host pre-check: reject src that exceeds the src-slot capacity before
-	// any guest call. Callers can raise the cap via Reserve.
 	if err := d.checkSrcCapacity(src); err != nil {
 		return nil, err
 	}
 
-	// Reserve wasm memory for src, dst, and meta slots. Grow from the current
-	// layout rather than shrinking back to the defaults, so that a caller who
-	// already reserved larger slots via Reserve keeps them.
-	dstBytes := max(initialDstSlotBytes, int(d.currentLayout.DstLen))
-	srcBytes := max(len(src), int(d.currentLayout.SrcLen))
-	if err := d.Reserve(dstBytes, srcBytes); err != nil {
-		return nil, err
-	}
 	lay := d.currentLayout
 
 	// Copy source data into the wasm src slot.
-	mem := d.module.Xmemory()
-	memBytes := *mem.Slice()
-	copy(memBytes[lay.SrcOff:lay.SrcOff+uint32(len(src))], src)
+	d.copySrcToSlot(lay, src)
 
 	// Invoke the guest decode.
 	ret := d.module.Xwuffs_decode_image(
@@ -120,7 +109,7 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 			// The guest has written image dimensions into the meta slot even
 			// though the destination buffer was too small; surface them so the
 			// caller can reserve a large enough slot and retry.
-			decMeta := readMeta(memBytes, lay)
+			decMeta := readMeta(*d.module.Xmemory().Slice(), lay)
 			var dts *DstTooSmallError
 			if errors.As(err, &dts) {
 				dts.MinBytes = decMeta.Stride * decMeta.Height
@@ -133,7 +122,7 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 	}
 
 	// Refresh memory view after guest call (guest may have grown memory).
-	memBytes = *d.module.Xmemory().Slice()
+	memBytes := *d.module.Xmemory().Slice()
 
 	// Read decoded metadata from the guest meta slot.
 	decMeta := readMeta(memBytes, lay)
@@ -201,29 +190,23 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 }
 
 // Probe reports image dimensions and format from src without decoding pixels.
-// It sizes the wasm src slot to hold src and calls the guest probe_image export,
-// which sniffs the format and decodes the image config, then overrides the
-// pixel config to the BGRA_PREMUL dest layout (stride = width*4) used by
-// DecodeRGBA. Probe writes no destination pixels; BytesWritten is 0.
+// It copies src into the already-reserved wasm src slot and calls the guest
+// probe_image export, which sniffs the format and decodes the image config,
+// then overrides the pixel config to the BGRA_PREMUL dest layout (stride =
+// width*4) used by DecodeRGBA. Probe writes no destination pixels;
+// BytesWritten is 0. Probe honors the reserved src-slot capacity via
+// checkSrcCapacity and never resizes slots internally: it must not call
+// Reserve. Callers grow the src slot with Reserve before probing a source
+// larger than the default capacity.
 func (d *Decoder) Probe(src []byte) (*Meta, error) {
-	// Host pre-check: reject src that exceeds the src-slot capacity before
-	// any guest call. Callers can raise the cap via Reserve.
 	if err := d.checkSrcCapacity(src); err != nil {
 		return nil, err
 	}
 
-	// Reserve wasm memory for the src and meta slots. The dst slot is left at
-	// its current size — Probe does not grow or touch it.
-	srcBytes := max(len(src), int(d.currentLayout.SrcLen))
-	if err := d.Reserve(int(d.currentLayout.DstLen), srcBytes); err != nil {
-		return nil, err
-	}
 	lay := d.currentLayout
 
 	// Copy source data into the wasm src slot.
-	mem := d.module.Xmemory()
-	memBytes := *mem.Slice()
-	copy(memBytes[lay.SrcOff:lay.SrcOff+uint32(len(src))], src)
+	d.copySrcToSlot(lay, src)
 
 	// Invoke the guest probe.
 	ret := d.module.Xwuffs_probe_image(
@@ -239,10 +222,19 @@ func (d *Decoder) Probe(src []byte) (*Meta, error) {
 	}
 
 	// Refresh memory view after guest call (guest may have grown memory).
-	memBytes = *d.module.Xmemory().Slice()
+	memBytes := *d.module.Xmemory().Slice()
 
 	// Read decoded metadata from the guest meta slot.
 	decMeta := readMeta(memBytes, lay)
 	d.lastMeta = decMeta
 	return &d.lastMeta, nil
+}
+
+// copySrcToSlot copies src into the wasm src slot at lay.SrcOff. Callers must
+// ensure len(src) <= the reserved src-slot capacity. The wasm memory view is
+// refreshed so the copy targets the live backing slice.
+func (d *Decoder) copySrcToSlot(lay SlotLayout, src []byte) {
+	mem := d.module.Xmemory()
+	memBytes := *mem.Slice()
+	copy(memBytes[lay.SrcOff:lay.SrcOff+uint32(len(src))], src)
 }

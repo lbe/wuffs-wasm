@@ -9,9 +9,6 @@ func TestUnitMemoryLayout(t *testing.T) {
 	}
 
 	t.Run("constants meet minimums", func(t *testing.T) {
-		if maxSrc < 2*1024*1024 {
-			t.Errorf("maxSrc = %d, want >= %d (2 MiB)", maxSrc, 2*1024*1024)
-		}
 		if defaultInitialDstSlotBytes < 128*1024 {
 			t.Errorf("defaultInitialDstSlotBytes = %d, want >= %d (128 KiB)", defaultInitialDstSlotBytes, 128*1024)
 		}

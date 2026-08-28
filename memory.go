@@ -1,13 +1,12 @@
 package wuffs
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // Memory layout constants for guest linear memory slots.
 const (
-	// maxSrc is the maximum source slot size in bytes. Reserve may grow
-	// the src slot beyond this, but New() allocates at least this much.
-	maxSrc = 2 * 1024 * 1024 // 2 MiB
-
 	// defaultInitialDstSlotBytes is the initial destination slot size in bytes.
 	defaultInitialDstSlotBytes = 128 * 1024 // 128 KiB
 )
@@ -21,7 +20,6 @@ const (
 	// defaultSrcCap is the source-slot capacity a fresh Decoder accepts
 	// before callers raise it via Reserve.
 	defaultSrcCap = 64 * 1024 // 64 KiB
-
 	// metaSlotBytes is the size of the metadata slot in bytes.
 	// Matches the C wuffs_wasm_decode_meta struct (6 × uint32 = 24 bytes).
 	metaSlotBytes = 24
@@ -33,6 +31,11 @@ const (
 
 	// wasmPageSize is the wasm linear memory page size in bytes.
 	wasmPageSize = 64 * 1024 // 64 KiB
+
+	// maxReservePages is the generated wasm module's authoritative maximum
+	// linear memory size, expressed in wasm pages (64 KiB each). 4096 pages
+	// equals 256 MiB and is enforced on every memory.Grow call.
+	maxReservePages = 4096
 )
 
 // align8 rounds n up to the next multiple of 8.
@@ -44,16 +47,30 @@ func slotTotal(dstBytes, srcBytes uint32) uint32 {
 	return align8(total)
 }
 
-// nonNegUint32 converts n to uint32, clamping negative values to zero.
-func nonNegUint32(n int) uint32 {
-	if n < 0 {
-		return 0
-	}
-	return uint32(n)
-}
-
 // errReserveGrowFailed is returned when memory.Grow fails during Reserve.
 var errReserveGrowFailed = fmt.Errorf("wuffs: Reserve failed: memory.Grow returned error")
+
+// errReserveInvalid is returned when a Reserve request cannot be represented
+// safely in uint32 slot/layout arithmetic or exceeds the generated wasm
+// module's authoritative maximum of 4096 pages (256 MiB).
+var errReserveInvalid = fmt.Errorf("wuffs: Reserve failed: request exceeds representable slot layout")
+
+// resolveSlot returns max(current, requested) as a uint32. A non-positive
+// request leaves the current slot unchanged. It returns errReserveInvalid when
+// the positive request cannot be represented in uint32 slot arithmetic.
+func resolveSlot(current uint32, requested int) (uint32, error) {
+	if requested <= 0 {
+		return current, nil
+	}
+	if uint64(requested) > math.MaxUint32 {
+		return 0, errReserveInvalid
+	}
+	nd := uint32(requested)
+	if nd > current {
+		return nd, nil
+	}
+	return current, nil
+}
 
 // SlotLayout describes the memory slot arrangement in wasm linear memory.
 // All offsets and lengths are in bytes relative to the start of wasm linear memory.
@@ -100,43 +117,54 @@ func (d *Decoder) MemoryLayout() SlotLayout {
 }
 
 // Reserve grows wasm memory and updates slot layout for the given destination
-// and source sizes. It calls memory.Grow when the required layout exceeds the
-// current wasm page count, then refreshes the active memory view.
+// and source sizes. Each requested slot is treated independently as
+// max(current length, requested length): a negative or smaller request leaves
+// the existing slot capacity and the complete SlotLayout unchanged. Requests
+// that cannot be represented safely in uint32 slot or layout arithmetic, or
+// whose complete layout would exceed the module's 4096-page maximum, are
+// rejected with a non-nil error and leave all state unchanged.
 func (d *Decoder) Reserve(dstBytes, srcBytes int) error {
-	// Raise the source capacity to accommodate the requested src slot.
-	if srcBytes > d.srcCap {
-		d.srcCap = srcBytes
+	cur := d.currentLayout
+
+	newDst, err := resolveSlot(cur.DstLen, dstBytes)
+	if err != nil {
+		return err
+	}
+	newSrc, err := resolveSlot(cur.SrcLen, srcBytes)
+	if err != nil {
+		return err
 	}
 
-	dst := nonNegUint32(dstBytes)
-	src := nonNegUint32(srcBytes)
+	// Validate the complete slot layout arithmetic in uint64 before any
+	// conversion to uint32 or mutation of d.currentLayout.
+	total := uint64(metaSlotBytes) + uint64(newSrc) + uint64(newDst)
+	if total < uint64(newSrc) || total < uint64(newDst) {
+		return errReserveInvalid
+	}
+	total = (total + 7) &^ 7 // align8
+	requiredMem := uint64(hostSlotRegionBase) + total
+	if requiredMem < uint64(hostSlotRegionBase) {
+		return errReserveInvalid
+	}
+	maxBytes := uint64(maxReservePages) * uint64(wasmPageSize)
+	if requiredMem > maxBytes {
+		return errReserveInvalid
+	}
 
+	// Grow the host linear memory only if the required layout does not already
+	// fit within the current page count. Host growth uses the 4096-page limit.
 	mem := d.module.Xmemory()
 	currentBytes := uint32(len(*mem.Slice()))
-
-	// Tentatively compute layout with current memory to check if growth is needed.
-	trial := computeLayout(currentBytes, dst, src)
-	if trial.HostBase >= hostSlotRegionBase {
-		// Slots fit within current memory.
-		d.currentLayout = trial
-		return nil
-	}
-
-	// Slots don't fit: grow memory so that hostSlotRegionBase + totalSlots <= newMemSize.
-	totalSlots := slotTotal(dst, src)
-	requiredMem := uint64(hostSlotRegionBase) + uint64(totalSlots)
-	pagesNeeded := (requiredMem + wasmPageSize - 1) / wasmPageSize
-	currentPages := uint64(currentBytes) / wasmPageSize
-	delta := int64(pagesNeeded - currentPages)
-	if delta > 0 {
-		const maxPages = int64(0x10000) // 1 GiB
-		oldPages := mem.Grow(delta, maxPages)
-		if oldPages < 0 {
+	pagesNeeded := (requiredMem + uint64(wasmPageSize) - 1) / uint64(wasmPageSize)
+	currentPages := uint64(currentBytes) / uint64(wasmPageSize)
+	if pagesNeeded > currentPages {
+		delta := int64(pagesNeeded - currentPages)
+		if mem.Grow(delta, maxReservePages) < 0 {
 			return errReserveGrowFailed
 		}
 		currentBytes = uint32(len(*mem.Slice()))
 	}
 
-	d.currentLayout = computeLayout(currentBytes, dst, src)
+	d.currentLayout = computeLayout(currentBytes, newDst, newSrc)
 	return nil
 }
