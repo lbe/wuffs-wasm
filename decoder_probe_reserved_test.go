@@ -22,7 +22,7 @@ import (
 //     metadata and BytesWritten == 0, while the same source extended to
 //     SrcLen+1 returns ErrSrcTooLarge before invoking the guest.
 //   - The captured wasm memory backing pointer (unsafe.SliceData), wasm byte
-//     length, and complete SlotLayout stay identical around both calls,
+//     length, and complete slotLayout stay identical around both calls,
 //     including the destination-slot capacity.
 func TestProbeHonorsReservedSourceCapacity(t *testing.T) {
 	// --- AST contract: Probe must not call (*Decoder).Reserve ---
@@ -79,7 +79,7 @@ func TestProbeHonorsReservedSourceCapacity(t *testing.T) {
 		if err := d.Reserve(0, reserved); err != nil {
 			t.Fatalf("Reserve(0,%d): %v", reserved, err)
 		}
-		if got := d.MemoryLayout().SrcLen; got != uint32(reserved) {
+		if got := d.currentLayout.srcLen; got != uint32(reserved) {
 			t.Fatalf("reserved src slot SrcLen = %d, want %d", got, reserved)
 		}
 
@@ -115,7 +115,7 @@ func TestProbeHonorsReservedSourceCapacity(t *testing.T) {
 		postLen := len(*postSlice)
 		postLayout := d.currentLayout
 		if postLayout != preLayout {
-			t.Errorf("SlotLayout changed after reserved Probe:\n pre = %+v\n post = %+v", preLayout, postLayout)
+			t.Errorf("slotLayout changed after reserved Probe:\n pre = %+v\n post = %+v", preLayout, postLayout)
 		}
 		if postLen != preLen {
 			t.Errorf("wasm byte length after reserved Probe = %d, want %d", postLen, preLen)
@@ -154,7 +154,7 @@ func TestProbeHonorsReservedSourceCapacity(t *testing.T) {
 		postLen := len(*postSlice)
 		postLayout := d.currentLayout
 		if postLayout != preLayout {
-			t.Errorf("SlotLayout changed after rejected Probe:\n pre = %+v\n post = %+v", preLayout, postLayout)
+			t.Errorf("slotLayout changed after rejected Probe:\n pre = %+v\n post = %+v", preLayout, postLayout)
 		}
 		if postLen != preLen {
 			t.Errorf("wasm byte length after rejected Probe = %d, want %d", postLen, preLen)

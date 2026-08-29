@@ -14,7 +14,7 @@ import (
 type Decoder struct {
 	module        *wuffswasm.Module
 	wasi          *wasihost.State
-	currentLayout SlotLayout
+	currentLayout slotLayout
 	lastMeta      Meta // reused Meta return value to avoid per-decode allocation; returned pointer aliases this field
 }
 
@@ -48,18 +48,13 @@ func (d *Decoder) VersionNum() int32 {
 	return d.module.Xwuffs_version()
 }
 
-// readMeta reads the decoded metadata from mem at the meta offset described by layout.
-func readMeta(mem []byte, layout SlotLayout) Meta {
-	return ReadMeta(mem, layout.MetaOff)
-}
-
 // checkSrcCapacity rejects src larger than the reserved src-slot capacity,
 // returning ErrSrcTooLarge before any guest call. The capacity authority is
-// the decoder's currentLayout.SrcLen (grown via Reserve); there is no separate
+// the decoder's currentLayout.srcLen (grown via Reserve); there is no separate
 // capacity field. Comparing as uint64 keeps the bound correct when Go int and
 // uint32 differ in width.
 func (d *Decoder) checkSrcCapacity(src []byte) error {
-	if uint64(len(src)) > uint64(d.currentLayout.SrcLen) {
+	if uint64(len(src)) > uint64(d.currentLayout.srcLen) {
 		return ErrSrcTooLarge
 	}
 	return nil
@@ -97,9 +92,9 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 
 	// Invoke the guest decode.
 	ret := d.module.Xwuffs_decode_image(
-		int32(lay.SrcOff), int32(len(src)),
-		int32(lay.DstOff), int32(lay.DstLen),
-		int32(lay.MetaOff),
+		int32(lay.srcOff), int32(len(src)),
+		int32(lay.dstOff), int32(lay.dstLen),
+		int32(lay.metaOff),
 	)
 
 	// Map guest return codes to host errors.
@@ -109,7 +104,7 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 			// The guest has written image dimensions into the meta slot even
 			// though the destination buffer was too small; surface them so the
 			// caller can reserve a large enough slot and retry.
-			decMeta := readMeta(*d.module.Xmemory().Slice(), lay)
+			decMeta := readMeta(*d.module.Xmemory().Slice(), lay.metaOff)
 			var dts *DstTooSmallError
 			if errors.As(err, &dts) {
 				dts.MinBytes = decMeta.Stride * decMeta.Height
@@ -125,7 +120,7 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 	memBytes := *d.module.Xmemory().Slice()
 
 	// Read decoded metadata from the guest meta slot.
-	decMeta := readMeta(memBytes, lay)
+	decMeta := readMeta(memBytes, lay.metaOff)
 	width := int(decMeta.Width)
 	height := int(decMeta.Height)
 
@@ -182,7 +177,7 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 		return nil, ErrBadImage
 	}
 	pixLen := uint32(decodedBytes)
-	wasmBGRA := memBytes[lay.DstOff : lay.DstOff+pixLen]
+	wasmBGRA := memBytes[lay.dstOff : lay.dstOff+pixLen]
 	convertBGRAtoRGBA(dst.Pix, dst.Stride, wasmBGRA, width, height)
 
 	d.lastMeta = decMeta
@@ -210,8 +205,8 @@ func (d *Decoder) Probe(src []byte) (*Meta, error) {
 
 	// Invoke the guest probe.
 	ret := d.module.Xwuffs_probe_image(
-		int32(lay.SrcOff), int32(len(src)),
-		int32(lay.MetaOff),
+		int32(lay.srcOff), int32(len(src)),
+		int32(lay.metaOff),
 	)
 
 	// Map guest return codes to host errors. The guest uses
@@ -225,16 +220,16 @@ func (d *Decoder) Probe(src []byte) (*Meta, error) {
 	memBytes := *d.module.Xmemory().Slice()
 
 	// Read decoded metadata from the guest meta slot.
-	decMeta := readMeta(memBytes, lay)
+	decMeta := readMeta(memBytes, lay.metaOff)
 	d.lastMeta = decMeta
 	return &d.lastMeta, nil
 }
 
-// copySrcToSlot copies src into the wasm src slot at lay.SrcOff. Callers must
+// copySrcToSlot copies src into the wasm src slot at lay.srcOff. Callers must
 // ensure len(src) <= the reserved src-slot capacity. The wasm memory view is
 // refreshed so the copy targets the live backing slice.
-func (d *Decoder) copySrcToSlot(lay SlotLayout, src []byte) {
+func (d *Decoder) copySrcToSlot(lay slotLayout, src []byte) {
 	mem := d.module.Xmemory()
 	memBytes := *mem.Slice()
-	copy(memBytes[lay.SrcOff:lay.SrcOff+uint32(len(src))], src)
+	copy(memBytes[lay.srcOff:lay.srcOff+uint32(len(src))], src)
 }

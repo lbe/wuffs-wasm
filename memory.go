@@ -72,22 +72,24 @@ func resolveSlot(current uint32, requested int) (uint32, error) {
 	return current, nil
 }
 
-// SlotLayout describes the memory slot arrangement in wasm linear memory.
+// slotLayout describes the memory slot arrangement in wasm linear memory.
 // All offsets and lengths are in bytes relative to the start of wasm linear memory.
-type SlotLayout struct {
-	MetaOff  uint32 // offset of metadata slot
-	MetaLen  uint32 // size of metadata slot
-	SrcOff   uint32 // offset of source data slot
-	SrcLen   uint32 // allocated size of source slot
-	DstOff   uint32 // offset of destination data slot
-	DstLen   uint32 // allocated size of destination slot
-	HostBase uint32 // base of host slot region
+// It is an internal implementation detail of guest scratch management, not part
+// of the public API.
+type slotLayout struct {
+	metaOff  uint32 // offset of metadata slot
+	metaLen  uint32 // size of metadata slot
+	srcOff   uint32 // offset of source data slot
+	srcLen   uint32 // allocated size of source slot
+	dstOff   uint32 // offset of destination data slot
+	dstLen   uint32 // allocated size of destination slot
+	hostBase uint32 // base of host slot region
 }
 
 // computeLayout computes the slot layout for the given memory size and slot
 // sizes. Slots are placed at the end of linear memory so that memory growth
 // shifts their offsets (guest needs to re-read meta after grow).
-func computeLayout(memSize uint32, dstBytes, srcBytes uint32) SlotLayout {
+func computeLayout(memSize uint32, dstBytes, srcBytes uint32) slotLayout {
 	totalSlots := slotTotal(dstBytes, srcBytes)
 
 	// Place slots at the end of memory, but not below the host slot region base.
@@ -100,37 +102,32 @@ func computeLayout(memSize uint32, dstBytes, srcBytes uint32) SlotLayout {
 	srcOff := metaOff + uint32(metaSlotBytes)
 	dstOff := srcOff + srcBytes
 
-	return SlotLayout{
-		MetaOff:  metaOff,
-		MetaLen:  uint32(metaSlotBytes),
-		SrcOff:   srcOff,
-		SrcLen:   srcBytes,
-		DstOff:   dstOff,
-		DstLen:   dstBytes,
-		HostBase: base,
+	return slotLayout{
+		metaOff:  metaOff,
+		metaLen:  uint32(metaSlotBytes),
+		srcOff:   srcOff,
+		srcLen:   srcBytes,
+		dstOff:   dstOff,
+		dstLen:   dstBytes,
+		hostBase: base,
 	}
-}
-
-// MemoryLayout returns the current memory slot layout.
-func (d *Decoder) MemoryLayout() SlotLayout {
-	return d.currentLayout
 }
 
 // Reserve grows wasm memory and updates slot layout for the given destination
 // and source sizes. Each requested slot is treated independently as
 // max(current length, requested length): a negative or smaller request leaves
-// the existing slot capacity and the complete SlotLayout unchanged. Requests
+// the existing slot capacity and the complete slot layout unchanged. Requests
 // that cannot be represented safely in uint32 slot or layout arithmetic, or
 // whose complete layout would exceed the module's 4096-page maximum, are
 // rejected with a non-nil error and leave all state unchanged.
 func (d *Decoder) Reserve(dstBytes, srcBytes int) error {
 	cur := d.currentLayout
 
-	newDst, err := resolveSlot(cur.DstLen, dstBytes)
+	newDst, err := resolveSlot(cur.dstLen, dstBytes)
 	if err != nil {
 		return err
 	}
-	newSrc, err := resolveSlot(cur.SrcLen, srcBytes)
+	newSrc, err := resolveSlot(cur.srcLen, srcBytes)
 	if err != nil {
 		return err
 	}

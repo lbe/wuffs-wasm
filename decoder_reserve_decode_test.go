@@ -28,7 +28,7 @@ import (
 //     while the same source extended to SrcLen+1 returns ErrSrcTooLarge before
 //     invoking the guest.
 //   - The captured wasm memory backing pointer (unsafe.SliceData), wasm byte
-//     length, and complete SlotLayout stay identical around both calls,
+//     length, and complete slotLayout stay identical around both calls,
 //     including the destination-slot capacity.
 //   - The successful decode must preserve the caller's dst.Pix slice identity
 //     (the library never allocates or replaces Pix, nor points it at wasm
@@ -89,7 +89,7 @@ func TestDecodeRGBAHonorsReservedSourceCapacity(t *testing.T) {
 		if err := d.Reserve(0, reserved); err != nil {
 			t.Fatalf("Reserve(0,%d): %v", reserved, err)
 		}
-		if got := d.MemoryLayout().SrcLen; got != uint32(reserved) {
+		if got := d.currentLayout.srcLen; got != uint32(reserved) {
 			t.Fatalf("reserved src slot SrcLen = %d, want %d", got, reserved)
 		}
 
@@ -172,7 +172,7 @@ func TestDecodeRGBAHonorsReservedSourceCapacity(t *testing.T) {
 type memState struct {
 	ptr    unsafe.Pointer
 	length int
-	layout SlotLayout
+	layout slotLayout
 }
 
 // captureMemState records the current wasm backing pointer, byte length, and
@@ -194,7 +194,7 @@ func assertMemUnchanged(t *testing.T, d *Decoder, pre memState, tag string) {
 	t.Helper()
 	post := captureMemState(t, d)
 	if post.layout != pre.layout {
-		t.Errorf("SlotLayout changed after %s DecodeRGBA:\n pre = %+v\n post = %+v", tag, pre.layout, post.layout)
+		t.Errorf("slotLayout changed after %s DecodeRGBA:\n pre = %+v\n post = %+v", tag, pre.layout, post.layout)
 	}
 	if post.length != pre.length {
 		t.Errorf("wasm byte length after %s DecodeRGBA = %d, want %d", tag, post.length, pre.length)

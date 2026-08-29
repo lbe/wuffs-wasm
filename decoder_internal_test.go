@@ -9,21 +9,21 @@ import (
 )
 
 // TestIntegrationSourceSlotDefinesDecoderCapacity verifies that a fresh
-// Decoder's source capacity is defined by MemoryLayout().SrcLen (64 KiB) and
+// Decoder's source capacity is defined by currentLayout.srcLen (64 KiB) and
 // that both Probe and DecodeRGBA reject a source one byte larger than that
 // slot with ErrSrcTooLarge before invoking the guest. The rejection must leave
-// the complete SlotLayout, the wasm byte length, and the wasm slice backing
+// the complete slotLayout, the wasm byte length, and the wasm slice backing
 // pointer untouched — proving the decoder holds no independent source-capacity
-// state that can disagree with currentLayout.SrcLen.
+// state that can disagree with currentLayout.srcLen.
 func TestIntegrationSourceSlotDefinesDecoderCapacity(t *testing.T) {
 	const wantSrcLen = 64 * 1024
 
 	d := New()
 
 	// A fresh decoder must report a 64 KiB source slot.
-	layout := d.MemoryLayout()
-	if layout.SrcLen != wantSrcLen {
-		t.Fatalf("fresh MemoryLayout().SrcLen = %d, want %d", layout.SrcLen, wantSrcLen)
+	layout := d.currentLayout
+	if layout.srcLen != wantSrcLen {
+		t.Fatalf("fresh currentLayout.srcLen = %d, want %d", layout.srcLen, wantSrcLen)
 	}
 
 	// A source exactly one byte larger than the source slot must be rejected.
@@ -71,7 +71,7 @@ func TestIntegrationSourceSlotDefinesDecoderCapacity(t *testing.T) {
 			postLayout := d.currentLayout
 
 			if postLayout != preLayout {
-				t.Errorf("SlotLayout changed after %s rejection:\n pre = %+v\n post = %+v", tc.name, preLayout, postLayout)
+				t.Errorf("slotLayout changed after %s rejection:\n pre = %+v\n post = %+v", tc.name, preLayout, postLayout)
 			}
 			if postLen != preLen {
 				t.Errorf("wasm byte length after %s rejection = %d, want %d", tc.name, postLen, preLen)
@@ -83,31 +83,31 @@ func TestIntegrationSourceSlotDefinesDecoderCapacity(t *testing.T) {
 	}
 }
 
-// TestIntegrationSourceCapacityUsesCurrentLayout proves that currentLayout.SrcLen
+// TestIntegrationSourceCapacityUsesCurrentLayout proves that currentLayout.srcLen
 // is the sole source-capacity authority: the Decoder struct holds no independent
-// srcCap field, and shrinking only currentLayout.SrcLen causes a source of
+// srcCap field, and shrinking only currentLayout.srcLen causes a source of
 // SrcLen+1 bytes to be rejected with ErrSrcTooLarge before any guest call, while
-// leaving the complete SlotLayout, the wasm byte length, and the wasm backing
+// leaving the complete slotLayout, the wasm byte length, and the wasm backing
 // pointer untouched.
 func TestIntegrationSourceCapacityUsesCurrentLayout(t *testing.T) {
 	t.Run("Decoder has no independent srcCap field", func(t *testing.T) {
 		// The decoder must not retain a duplicate source-capacity field that
-		// can disagree with currentLayout.SrcLen.
+		// can disagree with currentLayout.srcLen.
 		decType := reflect.TypeOf(Decoder{})
 		if f, ok := decType.FieldByName("srcCap"); ok {
 			t.Fatalf("Decoder still carries independent srcCap field %+v; SrcLen must be the sole capacity authority", f)
 		}
 	})
 
-	t.Run("currentLayout.SrcLen controls rejection", func(t *testing.T) {
+	t.Run("currentLayout.srcLen controls rejection", func(t *testing.T) {
 		// A small positive source slot, well below the old 64 KiB default.
 		const reducedSrcLen = 16
 
 		d := New()
-		// Reduce ONLY currentLayout.SrcLen. No Reserve, so the guest memory
+		// Reduce ONLY currentLayout.srcLen. No Reserve, so the guest memory
 		// layout is otherwise unchanged and the old 64 KiB capacity would have
 		// accepted this source.
-		d.currentLayout.SrcLen = reducedSrcLen
+		d.currentLayout.srcLen = reducedSrcLen
 
 		// Capture the full slot layout, wasm byte length, and backing pointer
 		// before the rejected call.
@@ -135,7 +135,7 @@ func TestIntegrationSourceCapacityUsesCurrentLayout(t *testing.T) {
 		postLayout := d.currentLayout
 
 		if postLayout != preLayout {
-			t.Errorf("SlotLayout changed after rejection:\n pre = %+v\n post = %+v", preLayout, postLayout)
+			t.Errorf("slotLayout changed after rejection:\n pre = %+v\n post = %+v", preLayout, postLayout)
 		}
 		if postLen != preLen {
 			t.Errorf("wasm byte length after rejection = %d, want %d", postLen, preLen)

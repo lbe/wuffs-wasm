@@ -855,8 +855,8 @@ func TestIntegrationProbe_SentinelErrors(t *testing.T) {
 		}
 
 		// Probe did not grow the dst slot.
-		if got := d.MemoryLayout().DstLen; got != 1024 {
-			t.Errorf("MemoryLayout().DstLen = %d, want 1024", got)
+		if got := wuffs.CurrentDstSlotLen(d); got != 1024 {
+			t.Errorf("CurrentDstSlotLen(d) = %d, want 1024", got)
 		}
 
 		// Same Decoder, correctly sized host dst, no Reserve: DecodeRGBA must

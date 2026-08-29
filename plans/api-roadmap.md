@@ -86,8 +86,10 @@ The repository currently provides:
   pixel, and allocation coverage
 - zero-allocation repeated RGBA decode after explicit reservation
 
-The reviewed explicit-Reserve TDD plan exists but is not marked complete by this
-roadmap until its orchestrated execution and review evidence are accepted.
+The explicit-Reserve workstream is complete. Source and destination reservations
+grow independently and monotonically, the current source slot is the sole source
+capacity authority, and neither `Probe` nor `DecodeRGBA` reserves or relocates
+guest memory internally.
 
 ## Status values
 
@@ -104,8 +106,8 @@ roadmap until its orchestrated execution and review evidence are accepted.
 
 | ID         | Capability                              | Plan type | Plan file                                      | Depends on          | Guest changes | Status        |
 | ---------- | --------------------------------------- | --------- | ---------------------------------------------- | ------------------- | ------------- | ------------- |
-| `CORE-01`  | Explicit `Reserve` semantics            | TDD       | `.pi/tdd-plans/enforce-explicit-reserve.yaml`  | Current baseline    | No            | `Ready`       |
-| `CORE-02`  | Remove accidental public exports        | Runbook   | To be created                                  | `CORE-01`           | No            | `Not planned` |
+| `CORE-01`  | Explicit `Reserve` semantics            | TDD       | `.pi/tdd-plans/enforce-explicit-reserve.yaml`  | Current baseline    | No            | `Complete`    |
+| `CORE-02`  | Remove accidental public exports        | Runbook   | `plans/core-02-public-api-boundary.md`         | `CORE-01`           | No            | `Complete`    |
 | `STILL-01` | `DecodeNRGBA` and `DecodeGray`          | TDD       | To be created                                  | `CORE-02`           | No            | `Not planned` |
 | `CONV-01`  | Package-level allocating decode helpers | TDD       | To be created                                  | `STILL-01`          | No            | `Not planned` |
 | `ADAPT-01` | Reader and config adapters              | TDD       | To be created                                  | `CONV-01`           | No            | `Not planned` |

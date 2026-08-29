@@ -29,14 +29,14 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 		return uintptr(unsafe.Pointer(&(*s)[0]))
 	}
 
-	// assertReserveUnchanged asserts the complete SlotLayout, wasm byte length,
+	// assertReserveUnchanged asserts the complete slotLayout, wasm byte length,
 	// and backing pointer are identical to the captured values. Used to prove a
 	// rejected or no-growth Reserve is failure-atomic.
-	assertReserveUnchanged := func(t *testing.T, d *Decoder, before SlotLayout, beforeLen int, beforePtr uintptr) {
+	assertReserveUnchanged := func(t *testing.T, d *Decoder, before slotLayout, beforeLen int, beforePtr uintptr) {
 		t.Helper()
-		after := d.MemoryLayout()
+		after := d.currentLayout
 		if after != before {
-			t.Errorf("SlotLayout changed: before=%+v after=%+v", before, after)
+			t.Errorf("slotLayout changed: before=%+v after=%+v", before, after)
 		}
 		if wasmLen(d) != beforeLen {
 			t.Errorf("wasm byte length changed: before=%d after=%d", beforeLen, wasmLen(d))
@@ -48,30 +48,30 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 
 	// assertSlotsValid asserts the installed slots are ordered, non-overlapping,
 	// and entirely within the wasm memory slice, using the actual computed
-	// SlotLayout from d.MemoryLayout().
-	assertSlotsValid := func(t *testing.T, d *Decoder, lay SlotLayout) {
+	// slotLayout from d.currentLayout.
+	assertSlotsValid := func(t *testing.T, d *Decoder, lay slotLayout) {
 		t.Helper()
 		wlen := wasmLen(d)
 		// In bounds: every slot extent [off, off+len) must satisfy off+len <= wasmLen.
-		if end := lay.MetaOff + lay.MetaLen; end > uint32(wlen) {
-			t.Errorf("meta slot out of bounds: off=%d len=%d end=%d wasmLen=%d", lay.MetaOff, lay.MetaLen, end, wlen)
+		if end := lay.metaOff + lay.metaLen; end > uint32(wlen) {
+			t.Errorf("meta slot out of bounds: off=%d len=%d end=%d wasmLen=%d", lay.metaOff, lay.metaLen, end, wlen)
 		}
-		if end := lay.SrcOff + lay.SrcLen; end > uint32(wlen) {
-			t.Errorf("src slot out of bounds: off=%d len=%d end=%d wasmLen=%d", lay.SrcOff, lay.SrcLen, end, wlen)
+		if end := lay.srcOff + lay.srcLen; end > uint32(wlen) {
+			t.Errorf("src slot out of bounds: off=%d len=%d end=%d wasmLen=%d", lay.srcOff, lay.srcLen, end, wlen)
 		}
-		if end := lay.DstOff + lay.DstLen; end > uint32(wlen) {
-			t.Errorf("dst slot out of bounds: off=%d len=%d end=%d wasmLen=%d", lay.DstOff, lay.DstLen, end, wlen)
+		if end := lay.dstOff + lay.dstLen; end > uint32(wlen) {
+			t.Errorf("dst slot out of bounds: off=%d len=%d end=%d wasmLen=%d", lay.dstOff, lay.dstLen, end, wlen)
 		}
 		// Ordered: meta < src < dst are monotonically increasing offsets.
-		if lay.MetaOff >= lay.SrcOff || lay.SrcOff >= lay.DstOff {
-			t.Errorf("slots not monotonically ordered: meta=%d src=%d dst=%d", lay.MetaOff, lay.SrcOff, lay.DstOff)
+		if lay.metaOff >= lay.srcOff || lay.srcOff >= lay.dstOff {
+			t.Errorf("slots not monotonically ordered: meta=%d src=%d dst=%d", lay.metaOff, lay.srcOff, lay.dstOff)
 		}
 		// Non-overlapping: src starts at/after meta end; dst starts at/after src end.
-		if lay.SrcOff < lay.MetaOff+lay.MetaLen {
-			t.Errorf("src overlaps meta: srcOff=%d metaEnd=%d", lay.SrcOff, lay.MetaOff+lay.MetaLen)
+		if lay.srcOff < lay.metaOff+lay.metaLen {
+			t.Errorf("src overlaps meta: srcOff=%d metaEnd=%d", lay.srcOff, lay.metaOff+lay.metaLen)
 		}
-		if lay.DstOff < lay.SrcOff+lay.SrcLen {
-			t.Errorf("dst overlaps src: dstOff=%d srcEnd=%d", lay.DstOff, lay.SrcOff+lay.SrcLen)
+		if lay.dstOff < lay.srcOff+lay.srcLen {
+			t.Errorf("dst overlaps src: dstOff=%d srcEnd=%d", lay.dstOff, lay.srcOff+lay.srcLen)
 		}
 	}
 
@@ -79,16 +79,16 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 	// increases DstLen.
 	t.Run("grows only destination slot", func(t *testing.T) {
 		d := New()
-		before := d.MemoryLayout()
+		before := d.currentLayout
 		if err := d.Reserve(4*1024*1024, 0); err != nil {
 			t.Fatalf("Reserve(4MiB,0) returned error: %v", err)
 		}
-		after := d.MemoryLayout()
-		if after.SrcLen != before.SrcLen {
-			t.Errorf("SrcLen not preserved: before=%d after=%d", before.SrcLen, after.SrcLen)
+		after := d.currentLayout
+		if after.srcLen != before.srcLen {
+			t.Errorf("SrcLen not preserved: before=%d after=%d", before.srcLen, after.srcLen)
 		}
-		if after.DstLen <= before.DstLen {
-			t.Errorf("DstLen did not grow: before=%d after=%d", before.DstLen, after.DstLen)
+		if after.dstLen <= before.dstLen {
+			t.Errorf("DstLen did not grow: before=%d after=%d", before.dstLen, after.dstLen)
 		}
 	})
 
@@ -96,21 +96,21 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 	// increases SrcLen.
 	t.Run("grows only source slot", func(t *testing.T) {
 		d := New()
-		before := d.MemoryLayout()
+		before := d.currentLayout
 		if err := d.Reserve(0, 4*1024*1024); err != nil {
 			t.Fatalf("Reserve(0,4MiB) returned error: %v", err)
 		}
-		after := d.MemoryLayout()
-		if after.DstLen != before.DstLen {
-			t.Errorf("DstLen not preserved: before=%d after=%d", before.DstLen, after.DstLen)
+		after := d.currentLayout
+		if after.dstLen != before.dstLen {
+			t.Errorf("DstLen not preserved: before=%d after=%d", before.dstLen, after.dstLen)
 		}
-		if after.SrcLen <= before.SrcLen {
-			t.Errorf("SrcLen did not grow: before=%d after=%d", before.SrcLen, after.SrcLen)
+		if after.srcLen <= before.srcLen {
+			t.Errorf("SrcLen did not grow: before=%d after=%d", before.srcLen, after.srcLen)
 		}
 	})
 
 	// Equal, smaller, negative, and negative-one-slot requests leave the
-	// complete SlotLayout, wasm byte length, and backing pointer unchanged and
+	// complete slotLayout, wasm byte length, and backing pointer unchanged and
 	// return a nil error.
 	t.Run("equal smaller negative leave state unchanged", func(t *testing.T) {
 		cases := []struct {
@@ -126,15 +126,15 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {
 				d := New()
-				before := d.MemoryLayout()
+				before := d.currentLayout
 				beforeLen := wasmLen(d)
 				beforePtr := wasmPtr(d)
 				if err := d.Reserve(c.dst, c.src); err != nil {
 					t.Fatalf("Reserve(%d,%d) returned error: %v", c.dst, c.src, err)
 				}
-				after := d.MemoryLayout()
+				after := d.currentLayout
 				if after != before {
-					t.Errorf("SlotLayout changed: before=%+v after=%+v", before, after)
+					t.Errorf("slotLayout changed: before=%+v after=%+v", before, after)
 				}
 				if wasmLen(d) != beforeLen {
 					t.Errorf("wasm byte length changed: before=%d after=%d", beforeLen, wasmLen(d))
@@ -150,16 +150,16 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 	// layout arithmetic is rejected: non-nil error and unchanged state.
 	t.Run("rejects uint32 overflow request", func(t *testing.T) {
 		d := New()
-		before := d.MemoryLayout()
+		before := d.currentLayout
 		beforeLen := wasmLen(d)
 		beforePtr := wasmPtr(d)
 		err := d.Reserve(math.MaxUint32, math.MaxUint32)
 		if err == nil {
 			t.Fatalf("Reserve(MaxUint32,MaxUint32) returned nil; want non-nil error (slot/layout arithmetic overflow)")
 		}
-		after := d.MemoryLayout()
+		after := d.currentLayout
 		if after != before {
-			t.Errorf("SlotLayout changed after rejected overflow request: before=%+v after=%+v", before, after)
+			t.Errorf("slotLayout changed after rejected overflow request: before=%+v after=%+v", before, after)
 		}
 		if wasmLen(d) != beforeLen {
 			t.Errorf("wasm byte length changed after rejected overflow request: before=%d after=%d", beforeLen, wasmLen(d))
@@ -174,7 +174,7 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 	// non-nil error and unchanged state.
 	t.Run("rejects layout exceeding 4096 pages", func(t *testing.T) {
 		d := New()
-		before := d.MemoryLayout()
+		before := d.currentLayout
 		beforeLen := wasmLen(d)
 		beforePtr := wasmPtr(d)
 		// dst=250MiB, src=0 => total ~250MiB; requiredMem = hostSlotRegionBase + 250MiB > 256MiB.
@@ -182,9 +182,9 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 		if err == nil {
 			t.Fatalf("Reserve(250MiB,0) returned nil; want non-nil error (exceeds 4096-page module max)")
 		}
-		after := d.MemoryLayout()
+		after := d.currentLayout
 		if after != before {
-			t.Errorf("SlotLayout changed after rejected over-limit request: before=%+v after=%+v", before, after)
+			t.Errorf("slotLayout changed after rejected over-limit request: before=%+v after=%+v", before, after)
 		}
 		if wasmLen(d) != beforeLen {
 			t.Errorf("wasm byte length changed after rejected over-limit request: before=%d after=%d", beforeLen, wasmLen(d))
@@ -233,7 +233,7 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 
 		t.Run("destination only", func(t *testing.T) {
 			d := New()
-			before := d.MemoryLayout()
+			before := d.currentLayout
 			beforeLen := wasmLen(d)
 			beforePtr := wasmPtr(d)
 			if err := d.Reserve(tooLarge, 0); err == nil {
@@ -244,7 +244,7 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 
 		t.Run("source only", func(t *testing.T) {
 			d := New()
-			before := d.MemoryLayout()
+			before := d.currentLayout
 			beforeLen := wasmLen(d)
 			beforePtr := wasmPtr(d)
 			if err := d.Reserve(0, tooLarge); err == nil {
@@ -260,7 +260,7 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 	// ever shrinks either capacity or perturbs state for no-growth calls.
 	t.Run("monotonic independent capacities across mixed requests", func(t *testing.T) {
 		d := New()
-		prev := d.MemoryLayout()
+		prev := d.currentLayout
 		steps := []struct {
 			name         string
 			dst, src     int
@@ -277,28 +277,28 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 		}
 		for _, s := range steps {
 			t.Run(s.name, func(t *testing.T) {
-				before := d.MemoryLayout()
+				before := d.currentLayout
 				beforeLen := wasmLen(d)
 				beforePtr := wasmPtr(d)
 				if err := d.Reserve(s.dst, s.src); err != nil {
 					t.Fatalf("Reserve(%d,%d) returned error: %v", s.dst, s.src, err)
 				}
-				after := d.MemoryLayout()
+				after := d.currentLayout
 
 				// Neither capacity may decrease within the call.
-				if after.SrcLen < before.SrcLen {
-					t.Errorf("SrcLen decreased within call: before=%d after=%d", before.SrcLen, after.SrcLen)
+				if after.srcLen < before.srcLen {
+					t.Errorf("SrcLen decreased within call: before=%d after=%d", before.srcLen, after.srcLen)
 				}
-				if after.DstLen < before.DstLen {
-					t.Errorf("DstLen decreased within call: before=%d after=%d", before.DstLen, after.DstLen)
+				if after.dstLen < before.dstLen {
+					t.Errorf("DstLen decreased within call: before=%d after=%d", before.dstLen, after.dstLen)
 				}
 
 				// Grow-only steps must leave the untouched slot exactly unchanged.
-				if s.srcUnchanged && after.SrcLen != before.SrcLen {
-					t.Errorf("SrcLen changed on dst-only grow: before=%d after=%d", before.SrcLen, after.SrcLen)
+				if s.srcUnchanged && after.srcLen != before.srcLen {
+					t.Errorf("SrcLen changed on dst-only grow: before=%d after=%d", before.srcLen, after.srcLen)
 				}
-				if s.dstUnchanged && after.DstLen != before.DstLen {
-					t.Errorf("DstLen changed on src-only grow: before=%d after=%d", before.DstLen, after.DstLen)
+				if s.dstUnchanged && after.dstLen != before.dstLen {
+					t.Errorf("DstLen changed on src-only grow: before=%d after=%d", before.dstLen, after.dstLen)
 				}
 
 				// No-growth requests preserve full layout and wasm identity.
@@ -311,12 +311,12 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 			})
 
 			// Across the whole sequence neither reserved capacity may decrease.
-			cur := d.MemoryLayout()
-			if cur.SrcLen < prev.SrcLen {
-				t.Errorf("SrcLen decreased across sequence at %q: prev=%d cur=%d", s.name, prev.SrcLen, cur.SrcLen)
+			cur := d.currentLayout
+			if cur.srcLen < prev.srcLen {
+				t.Errorf("SrcLen decreased across sequence at %q: prev=%d cur=%d", s.name, prev.srcLen, cur.srcLen)
 			}
-			if cur.DstLen < prev.DstLen {
-				t.Errorf("DstLen decreased across sequence at %q: prev=%d cur=%d", s.name, prev.DstLen, cur.DstLen)
+			if cur.dstLen < prev.dstLen {
+				t.Errorf("DstLen decreased across sequence at %q: prev=%d cur=%d", s.name, prev.dstLen, cur.dstLen)
 			}
 			prev = cur
 		}

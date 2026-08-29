@@ -5,7 +5,7 @@ import "encoding/binary"
 // Meta holds the decoded image metadata written by the guest into the meta slot.
 // The guest writes metadata (err, width, height, stride, bytes_written, format)
 // into the meta slot after a successful or partial decode. The host reads it
-// back via ReadMeta.
+// back via readMeta.
 //
 // Memory layout (little-endian uint32):
 //
@@ -33,10 +33,13 @@ const (
 	FormatWEBP uint32 = 0x57454250
 )
 
-// ReadMeta reads the Meta struct from the guest meta slot at the given offset
+// readMeta reads the Meta struct from the guest meta slot at the given offset
 // in wasm linear memory. The meta slot is 24 bytes (6 uint32 fields):
 // err, width, height, stride, bytes_written, format.
-func ReadMeta(mem []byte, metaOff uint32) Meta {
+//
+// It is an internal implementation detail of guest scratch management, not
+// part of the public API.
+func readMeta(mem []byte, metaOff uint32) Meta {
 	if int(metaOff)+24 > len(mem) {
 		return Meta{}
 	}

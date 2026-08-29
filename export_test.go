@@ -24,3 +24,9 @@ func SetInitialDstSlotBytes(n int) func() {
 	initialDstSlotBytes = n
 	return func() { initialDstSlotBytes = old }
 }
+
+// CurrentDstSlotLen is a test-only helper that returns the current destination
+// slot length of d. It exposes only that single value so external-package
+// tests can assert destination-slot behavior without widening the public API or
+// exposing the complete memory layout.
+func CurrentDstSlotLen(d *Decoder) uint32 { return d.currentLayout.dstLen }
