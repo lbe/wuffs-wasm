@@ -56,7 +56,8 @@ Formats outside [Wuffs image decoders](https://github.com/google/wuffs/blob/main
 ### Current limitations
 
 - **Still images / first frame only** — animated GIF and WebP decode frame 0; no multi-frame API yet.
-- **Output** — `image.RGBA` (straight, non-premultiplied) only.
+- **Output** — caller-owned `image.RGBA`, `image.NRGBA`, or `image.Gray`
+  buffers (straight, non-premultiplied color; Gray uses one byte per pixel).
 - **No metadata API** — EXIF, ICC profiles, and similar are not exposed.
 
 ## Install

@@ -20,3 +20,5 @@ All fixtures are copied from:
 - `bricks-color.png` - PNG test image
 - `harvesters.png` - PNG test image (PNG performance gate fixture)
 - `bricks-color.lossless.webp` - WebP lossless test image
+- `alpha-pixels.png` - deterministic 3×1 PNG generated in-repository; its
+  pixels are opaque, translucent, and fully transparent for NRGBA tests

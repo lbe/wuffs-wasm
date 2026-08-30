@@ -66,7 +66,7 @@ In `DecodeRGBA` success path:
 2. Do **not** overwrite `Rect`/`Stride` except to match a decode that the
    caller already sized correctly (or leave them unchanged if they already
    match).
-3. Convert: `convertBGRAtoRGBA(dst.Pix, dst.Stride, wasmBGRA, width, height)`
+3. Convert: `convertBGRAToRGBA(dst.Pix, dst.Stride, wasmBGRA, width, height)`
    where `wasmBGRA` is the guest dst slot.
 4. Reject bad host `dst` per `API.md`:
    - Empty `Rect`, nil/empty `Pix`, or `Dx`/`Dy` that do not equal decoded

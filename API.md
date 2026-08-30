@@ -255,6 +255,12 @@ Contract for all three:
 Returned `*Meta` matches `Probe` for the same `src`, with `BytesWritten` set
 to the number of pixel bytes written into `Pix`.
 
+For `DecodeGray`, `Pix` contains one byte per pixel whose values follow
+`color.GrayModel`, and `BytesWritten` is `Width*Height`. `Meta.Stride` still
+reports the guest BGRA scratch stride, `Width*4`, because guest reservation
+and metadata use the common decode path; the caller-owned Gray stride is
+validated and used only for one-byte host output.
+
 ### Animation
 
 ```go

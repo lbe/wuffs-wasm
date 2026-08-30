@@ -1030,6 +1030,33 @@ func TestIntegrationDecodeRGBA_PNGGolden(t *testing.T) {
 	}
 }
 
+// TestIntegrationDecodeGrayReportsCallerOwnedBytesWritten verifies that a
+// successful DecodeGray reports the bytes written to the caller-owned Gray
+// destination, rather than the four-byte-per-pixel wasm scratch buffer.
+func TestIntegrationDecodeGrayReportsCallerOwnedBytesWritten(t *testing.T) {
+	const (
+		wantW = 160
+		wantH = 120
+	)
+
+	src := loadFixture(t, "bricks-color.png")
+	dst := image.NewGray(image.Rect(0, 0, wantW, wantH))
+
+	meta, err := wuffs.New().DecodeGray(dst, src)
+	if err != nil {
+		t.Fatalf("DecodeGray: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("DecodeGray returned nil Meta")
+	}
+
+	wantBytesWritten := uint32(wantW * wantH)
+	if meta.BytesWritten != wantBytesWritten {
+		t.Errorf("DecodeGray Meta.BytesWritten = %d, want %d (Width*Height)",
+			meta.BytesWritten, wantBytesWritten)
+	}
+}
+
 // TestIntegrationDecodeRGBA_WEBP verifies that DecodeRGBA decodes
 // testdata/bricks-color.lossless.webp (160×120) into a pre-allocated
 // image.RGBA with correct dimensions and at least one non-zero pixel.
