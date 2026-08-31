@@ -313,13 +313,36 @@ func DecodeGray(src []byte) (*image.Gray, *Meta, error)
 func DecodeConfig(src []byte) (image.Config, error)
 ```
 
-`Decode` is `New` + `Probe` + allocate `image.RGBA` + `Reserve` + `DecodeRGBA`.
-`DecodeConfig` is `image.Config{ColorModel: color.RGBAModel, Width, Height}`
-from `Probe` (RGBAModel for `Decode`; GrayModel for `DecodeGray`).
+`Decode` is `New` + `Reserve(0, len(src))` + `Probe` + validated geometry +
+`Reserve(guestLen, len(src))` + `image.NewRGBA` + `DecodeRGBA`. It
+allocates a temporary decoder and tightly packed `*image.RGBA`, then returns a
+detached `*Meta` that does not alias the decoder's internal state. On any
+failure both the image and Meta return values are `nil`. `DecodeNRGBA` mirrors
+`Decode` exactly but allocates a tightly packed `*image.NRGBA` via
+`image.NewNRGBA` and decodes with `DecodeNRGBA`. `DecodeGray` mirrors
+`Decode` but allocates a tightly packed `*image.Gray` via `image.NewGray`
+and decodes with `DecodeGray`. The guest scratch slot remains four bytes per
+pixel (BGRA), so `Meta.Stride` retains the guest stride (`Width*4`), while
+`Meta.BytesWritten` reports the host bytes written (`Width*Height`). On any
+failure both the image and Meta return values are `nil`. Automatic source
+reservation (`Reserve(0, len(src))`) precedes probing so the source slot fits
+`src` before any guest call; automatic destination reservation follows
+validated geometry and precedes host allocation.
 
-`Probe` (package function) is `New` + `(*Decoder).Probe`. It exists for
-callers who do not reuse a decoder. The method on `Decoder` is the one that
-matches the zero-alloc reusable path.
+`DecodeConfig` returns `image.Config{ColorModel: color.RGBAModel, Width, Height}`
+from the same internal probe path — no pixels are decoded, no destination is
+allocated. Each call builds its own temporary decoder, automatically reserves
+the source slot to fit `src` with `Reserve(0, len(src))`, and returns only the
+image configuration. The `ColorModel` is always `color.RGBAModel` for compatible
+Wuffs input (the package's default decode target). On failure `DecodeConfig`
+returns a zero-value `image.Config` and the error.
+
+`Probe` (package function) is `New` + `Reserve(0, len(src))` +
+`(*Decoder).Probe`. It sniffs format and decodes image config without touching
+pixels or allocating a destination. Each call builds its own temporary decoder,
+grows the source slot to fit `src`, and returns a detached `*Meta` that does not
+alias the decoder's internal state. The `Decoder.Probe` method is the zero-alloc
+reusable path.
 
 ### stdlib `image` adapter
 

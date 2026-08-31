@@ -116,7 +116,7 @@ func TestUnitPublicAPIBoundary(t *testing.T) {
 	wantConsts := []string{"FormatPNG", "FormatWEBP"}
 	wantVars := []string{"ErrBadImage", "ErrDecode", "ErrDstTooSmall", "ErrSrcTooLarge", "ErrUnknownFormat"}
 	wantTypes := []string{"Decoder", "DstTooSmallError", "Meta"}
-	wantFuncs := []string{"New"}
+	wantFuncs := []string{"New", "Probe", "Decode", "DecodeConfig", "DecodeGray", "DecodeNRGBA"}
 	wantMethods := map[string][]string{
 		"Decoder":          {"DecodeGray", "DecodeNRGBA", "DecodeRGBA", "Probe", "Reserve", "Version", "VersionNum"},
 		"DstTooSmallError": {"Error", "Is"},
