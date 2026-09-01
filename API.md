@@ -348,20 +348,32 @@ reusable path.
 
 ```go
 func DecodeReader(r io.Reader) (image.Image, string, error)
+
 func DecodeConfigReader(r io.Reader) (image.Config, error)
+```
+
+`DecodeReader` reads `r` fully to EOF into a `[]byte`, then delegates to the
+allocating `Decode` helper. It returns a newly allocated `*image.RGBA` as an
+`image.Image`, together with the canonical format name (`"png"` or `"webp"`)
+for the supported formats. Reader errors and decode errors retain their exact
+identity; failures return a nil image and an empty format. Full buffering and
+image allocation are intentional. The adapter does not register formats with
+the standard library's global image decoder registry.
+
+`DecodeConfigReader` reads `r` fully to EOF into a `[]byte`, then applies the
+same configuration-only decode as `DecodeConfig`. It returns
+`image.Config{ColorModel: color.RGBAModel, Width, Height}` on success. Reader
+and decode errors retain their exact identity; failures return a zero
+`image.Config`. Full buffering is intentional, and the adapter does not
+register formats with the standard library's global image decoder registry.
+
+The following roadmap API is future and is not currently implemented:
+
+```go
 func RegisterFormats()
 ```
 
-`DecodeReader` / `DecodeConfigReader` match `image.Decode` /
-`image.DecodeConfig`: they read `r` fully into a `[]byte`, then call `Decode`
-/ `DecodeConfig`. They cannot be zero-alloc.
-
-`RegisterFormats` calls `image.RegisterFormat` for each format this package
-decodes, using stdlib names (`"png"`, `"jpeg"`, `"gif"`, `"webp"`, `"bmp"`,
-and the remaining Wuffs names as lowercase FourCC stems: `"qoi"`, `"tga"`,
-`"wbmp"`, `"nie"`, `"pnm"` for Netpbm, `"etc2"`, `"thumbhash"`, `"handsum"`).
-
-The format `string` returned by `DecodeReader` is that registered name.
+`RegisterFormats` will provide explicit opt-in registration.
 
 ---
 
