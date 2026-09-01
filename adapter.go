@@ -22,6 +22,12 @@ func formatName(fourCC uint32) (string, error) {
 		return "png", nil
 	case FormatWEBP:
 		return "webp", nil
+	case FormatBMP:
+		return "bmp", nil
+	case FormatGIF:
+		return "gif", nil
+	case FormatJPEG:
+		return "jpeg", nil
 	default:
 		return "", ErrUnknownFormat
 	}
@@ -66,7 +72,7 @@ func decodeConfigReaderWithDecoder(r io.Reader, decode configReaderDecoder) (ima
 
 // DecodeReader reads r to EOF and decodes the buffered bytes into a newly
 // allocated *image.RGBA. The returned format is the canonical name for the
-// decoded format (currently "png" or "webp"). It does not register formats
+// decoded format: png, webp, bmp, gif, or jpeg. It does not register formats
 // with the standard library image package.
 func DecodeReader(r io.Reader) (image.Image, string, error) {
 	return decodeReaderWithDecoder(r, Decode)

@@ -27,7 +27,7 @@ func (r *partialErrorReader) Read(p []byte) (int, error) {
 	return n, r.err
 }
 
-func TestReaderFormatNames(t *testing.T) {
+func TestUnitReaderFormatNames(t *testing.T) {
 	// Keep the expected error in each case so supported formats also assert
 	// that the mapper does not unexpectedly return an error.
 	tests := []struct {
@@ -52,6 +52,48 @@ func TestReaderFormatNames(t *testing.T) {
 				t.Errorf("formatName(0x%08X) error = %v, want exact %v", tt.fourCC, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestUnitFormatNameBMP(t *testing.T) {
+	// The BMP FourCC must map to the canonical standard-library adapter name
+	// "bmp" with no error. The mapper currently lacks a BMP case, so this
+	// fails until the mapping exists.
+	got, err := formatName(FormatBMP)
+	if got != "bmp" {
+		t.Errorf("formatName(0x%08X) name = %q, want %q", FormatBMP, got, "bmp")
+	}
+	//nolint:errorlint // exact sentinel identity is part of the adapter contract
+	if err != nil {
+		t.Errorf("formatName(0x%08X) error = %v, want nil", FormatBMP, err)
+	}
+}
+
+func TestUnitFormatNameGIF(t *testing.T) {
+	// The GIF FourCC must map to the canonical standard-library adapter name
+	// "gif" with no error. The mapper currently lacks a GIF case, so this
+	// fails until the mapping exists.
+	got, err := formatName(FormatGIF)
+	if got != "gif" {
+		t.Errorf("formatName(0x%08X) name = %q, want %q", FormatGIF, got, "gif")
+	}
+	//nolint:errorlint // exact sentinel identity is part of the adapter contract
+	if err != nil {
+		t.Errorf("formatName(0x%08X) error = %v, want nil", FormatGIF, err)
+	}
+}
+
+func TestUnitFormatNameJPEG(t *testing.T) {
+	// The JPEG FourCC must map to the canonical standard-library adapter name
+	// "jpeg" with no error. The mapper currently lacks a JPEG case, so this
+	// fails until the mapping exists.
+	got, err := formatName(FormatJPEG)
+	if got != "jpeg" {
+		t.Errorf("formatName(0x%08X) name = %q, want %q", FormatJPEG, got, "jpeg")
+	}
+	//nolint:errorlint // exact sentinel identity is part of the adapter contract
+	if err != nil {
+		t.Errorf("formatName(0x%08X) error = %v, want nil", FormatJPEG, err)
 	}
 }
 

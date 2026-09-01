@@ -19,8 +19,8 @@ import (
 // regular expressions) so that test-only exports do not become product API.
 //
 // The required inventory is the portion of API.md currently owned by the
-// baseline roadmap workstreams through CORE-02. Future roadmap tasks update
-// this inventory in their own plans.
+// baseline roadmap workstreams through CORE-02 plus the FORMAT-01 workstream.
+// Future roadmap tasks update this inventory in their own plans.
 func TestUnitPublicAPIBoundary(t *testing.T) {
 	fset := token.NewFileSet()
 
@@ -116,7 +116,7 @@ func TestUnitPublicAPIBoundary(t *testing.T) {
 	}
 
 	// Required inventory.
-	wantConsts := []string{"FormatPNG", "FormatWEBP"}
+	wantConsts := []string{"FormatPNG", "FormatWEBP", "FormatBMP", "FormatGIF", "FormatJPEG"}
 	wantVars := []string{"ErrBadImage", "ErrDecode", "ErrDstTooSmall", "ErrSrcTooLarge", "ErrUnknownFormat"}
 	wantTypes := []string{"Decoder", "DstTooSmallError", "Meta"}
 	wantFuncs := []string{"New", "Probe", "Decode", "DecodeConfig", "DecodeGray", "DecodeNRGBA", "DecodeReader", "DecodeConfigReader"}

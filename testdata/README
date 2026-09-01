@@ -17,8 +17,33 @@ All fixtures are copied from:
 
 ## Files
 
-- `bricks-color.png` - PNG test image
+- `bricks-color.bmp` - BMP test image; pixel-identical to `bricks-color.png`
+- `bricks-color.png` - PNG test image; oracle pair for `bricks-color.bmp`
+- `bricks-nodither.gif` - GIF (89a) test image; oracle pair is `bricks-nodither.png`
+- `bricks-nodither.png` - PNG test image; oracle pair for `bricks-nodither.gif`
+- `hat.jpeg` - baseline JPEG test image (90×112 RGB, no alpha)
+- `bricks-color.golden.crc32` - decimal CRC-32 of the decoded `bricks-color.png`
+  pixel bytes
+- `hat.jpeg.golden.nia.crc32` - decimal CRC-32 of `hat.jpeg`'s decoded pixels
+  re-encoded as a single-frame NIA v1-bn4 (non-premultiplied BGRA) stream,
+  per `../wuffs/doc/spec/nie-spec.md`; regenerated from an independent oracle
+  and checked in, never derived from the decoder under test
 - `harvesters.png` - PNG test image (PNG performance gate fixture)
 - `bricks-color.lossless.webp` - WebP lossless test image
 - `alpha-pixels.png` - deterministic 3×1 PNG generated in-repository; its
   pixels are opaque, translucent, and fully transparent for NRGBA tests
+
+## Verified formats
+
+- PNG, WebP, BMP, GIF, and JPEG are the verified public format set, each
+  backed by fixtures and integration coverage in this directory.
+
+## Checksums
+
+`hat.jpeg.golden.nia.crc32` stores the expected CRC-32 (IEEE) of the decoded
+`hat.jpeg` pixels converted to a canonical single-frame NIA v1-bn4 stream. Its
+value (0x2298F3CA / 580449226) and the NIA encoder's oracle value for
+`bricks-color.png` (0x076CB375 / 124564341) were produced by an encoder
+implemented directly from the Wuffs NIE/NIA specification and cross-checked
+against the standard library's `image/png` decoder; neither was obtained from
+this package's wasm decoder.

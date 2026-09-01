@@ -134,19 +134,11 @@ Image format FourCCs (`Meta.Format`). Values are `WUFFS_BASE__FOURCC__*`.
 
 ```go
 const (
-    FormatBMP   uint32 = 0x424D5020 // "BMP "
-    FormatETC2  uint32 = 0x45544332 // "ETC2"
-    FormatGIF   uint32 = 0x47494620 // "GIF "
-    FormatHNSM  uint32 = 0x484E534D // "HNSM" Handsum
-    FormatJPEG  uint32 = 0x4A504547 // "JPEG"
-    FormatNIE   uint32 = 0x4E494520 // "NIE "
-    FormatNPBM  uint32 = 0x4E50424D // "NPBM" Netpbm (PBM/PGM/PPM)
-    FormatPNG   uint32 = 0x504E4720 // "PNG "
-    FormatQOI   uint32 = 0x514F4920 // "QOI "
-    FormatTGA   uint32 = 0x54474120 // "TGA "
-    FormatTH    uint32 = 0x54482020 // "TH  " ThumbHash
-    FormatWBMP  uint32 = 0x57424D50 // "WBMP"
-    FormatWEBP  uint32 = 0x57454250 // "WEBP"
+	FormatBMP   uint32 = 0x424D5020 // "BMP "
+	FormatGIF   uint32 = 0x47494620 // "GIF "
+	FormatJPEG  uint32 = 0x4A504547 // "JPEG"
+	FormatPNG   uint32 = 0x504E4720 // "PNG "
+	FormatWEBP  uint32 = 0x57454250 // "WEBP"
 )
 ```
 
@@ -348,17 +340,20 @@ reusable path.
 
 ```go
 func DecodeReader(r io.Reader) (image.Image, string, error)
-
-func DecodeConfigReader(r io.Reader) (image.Config, error)
 ```
 
 `DecodeReader` reads `r` fully to EOF into a `[]byte`, then delegates to the
 allocating `Decode` helper. It returns a newly allocated `*image.RGBA` as an
-`image.Image`, together with the canonical format name (`"png"` or `"webp"`)
-for the supported formats. Reader errors and decode errors retain their exact
-identity; failures return a nil image and an empty format. Full buffering and
-image allocation are intentional. The adapter does not register formats with
-the standard library's global image decoder registry.
+`image.Image`, together with the canonical format name (`"png"`, `"webp"`,
+`"bmp"`, `"gif"`, or `"jpeg"`) for the verified formats. Reader errors and
+decode errors retain their exact identity; failures return a nil image and an
+empty format. Full buffering and image allocation are intentional. The adapter
+does not register formats with the standard library's global image decoder
+registry.
+
+```go
+func DecodeConfigReader(r io.Reader) (image.Config, error)
+```
 
 `DecodeConfigReader` reads `r` fully to EOF into a `[]byte`, then applies the
 same configuration-only decode as `DecodeConfig`. It returns

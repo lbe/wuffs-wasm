@@ -23,10 +23,13 @@ image decoders; the Go package only **verifies** the formats listed under
 
 ### Supported (tested)
 
-| Format | Notes                       |
-| ------ | --------------------------- |
-| PNG    | Still images                |
-| WebP   | Lossless WebP only (tested) |
+| Format | Notes                              |
+| ------ | ---------------------------------- |
+| PNG    | Still images                       |
+| WebP   | Lossless WebP only (tested)        |
+| BMP    | Still images                       |
+| GIF    | First frame only (see limitations) |
+| JPEG   | Baseline JPEG                      |
 
 ### Not yet verified
 
@@ -36,10 +39,7 @@ until we add fixtures and tests.
 
 | Format               | Notes                                           |
 | -------------------- | ----------------------------------------------- |
-| JPEG                 |                                                 |
-| GIF                  | First frame only (see limitations)              |
 | WebP                 | Lossy variants not yet tested                   |
-| BMP                  |                                                 |
 | TGA                  |                                                 |
 | QOI                  |                                                 |
 | Netpbm (PBM/PGM/PPM) |                                                 |
@@ -205,8 +205,9 @@ func main() {
 
 It reads the `io.Reader` fully into memory, then delegates to `Decode`, so the
 returned image is a newly allocated `*image.RGBA`. Reader and decode errors are
-returned unchanged with nil image and an empty format. The format is currently
-`"png"` or `"webp"` for the supported inputs. `DecodeReader` does not modify
+returned unchanged with nil image and an empty format. The format is
+`"png"`, `"webp"`, `"bmp"`, `"gif"`, or `"jpeg"` for the verified inputs.
+`DecodeReader` does not modify
 the standard library's global image decoder registry; any future registration
 will be an explicit opt-in. For performance-sensitive callers, use the
 reusable `[]byte`/`Decoder` path above instead.
@@ -228,25 +229,25 @@ global image decoder registry.
 
 ## API
 
-| Symbol                                            | Description                                                                                                                        |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `New()`                                           | Construct a decoder (initializes the wasm guest).                                                                                  |
-| `Decode(src)`                                     | Allocate and decode into a tight `*image.RGBA` with detached `*Meta`.                                                              |
-| `DecodeNRGBA(src)`                                | Allocate and decode into a tight `*image.NRGBA` with detached `*Meta`.                                                             |
-| `DecodeGray(src)`                                 | Allocate and decode into a tight `*image.Gray` with detached `*Meta`. (Guest stride is 4 BPP; host bytes written `Width*Height`.)  |
-| `DecodeConfig(src)`                               | Return image configuration without decoding pixels.                                                                                |
-| `DecodeReader(r)`                                 | Read and buffer an `io.Reader`, then allocate and decode a `*image.RGBA`; returns the canonical format name (`"png"` or `"webp"`). |
-| `DecodeConfigReader(r)`                           | Read and buffer an `io.Reader`, then return its image configuration without decoding pixels.                                       |
-| `Probe(src)`                                      | Sniff format and dimensions without decoding pixels (allocates a temporary Decoder).                                               |
-| `(*Decoder) Probe(src)`                           | Dimensions and format without decoding pixels on a reusable Decoder; returns `*Meta`.                                              |
-| `(*Decoder) DecodeRGBA(dst, src)`                 | Decode a supported image into `dst`; returns `*Meta` on success.                                                                   |
-| `(*Decoder) Reserve(dstBytes, srcBytes)`          | Grow wasm src/dst slots before Probe or decode.                                                                                    |
-| `(*Decoder) Version()` / `VersionNum()`           | Embedded Wuffs library version.                                                                                                    |
-| `Meta`, `FormatPNG`, `FormatWEBP`                 | Decode metadata; FourCC constants for probed/decoded format.                                                                       |
-| `ErrUnknownFormat`, `ErrSrcTooLarge`, `ErrDecode` | Sentinel errors.                                                                                                                   |
-| `ErrBadImage`                                     | `dst` Rect/Stride/Pix do not match the decoded image (empty/nil/size mismatch).                                                    |
-| `ErrDstTooSmall`                                  | Sentinel for a destination too small (host layout or guest scratch).                                                               |
-| `*DstTooSmallError`                               | Structured error with required buffer size and image dimensions; matches `ErrDstTooSmall`.                                         |
+| Symbol                                                                    | Description                                                                                                                                                     |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `New()`                                                                   | Construct a decoder (initializes the wasm guest).                                                                                                               |
+| `Decode(src)`                                                             | Allocate and decode into a tight `*image.RGBA` with detached `*Meta`.                                                                                           |
+| `DecodeNRGBA(src)`                                                        | Allocate and decode into a tight `*image.NRGBA` with detached `*Meta`.                                                                                          |
+| `DecodeGray(src)`                                                         | Allocate and decode into a tight `*image.Gray` with detached `*Meta`. (Guest stride is 4 BPP; host bytes written `Width*Height`.)                               |
+| `DecodeConfig(src)`                                                       | Return image configuration without decoding pixels.                                                                                                             |
+| `DecodeReader(r)`                                                         | Read and buffer an `io.Reader`, then allocate and decode a `*image.RGBA`; returns the canonical format name (`"png"`, `"webp"`, `"bmp"`, `"gif"`, or `"jpeg"`). |
+| `DecodeConfigReader(r)`                                                   | Read and buffer an `io.Reader`, then return its image configuration without decoding pixels.                                                                    |
+| `Probe(src)`                                                              | Sniff format and dimensions without decoding pixels (allocates a temporary Decoder).                                                                            |
+| `(*Decoder) Probe(src)`                                                   | Dimensions and format without decoding pixels on a reusable Decoder; returns `*Meta`.                                                                           |
+| `(*Decoder) DecodeRGBA(dst, src)`                                         | Decode a supported image into `dst`; returns `*Meta` on success.                                                                                                |
+| `(*Decoder) Reserve(dstBytes, srcBytes)`                                  | Grow wasm src/dst slots before Probe or decode.                                                                                                                 |
+| `(*Decoder) Version()` / `VersionNum()`                                   | Embedded Wuffs library version.                                                                                                                                 |
+| `Meta`, `FormatPNG`, `FormatWEBP`, `FormatBMP`, `FormatGIF`, `FormatJPEG` | Decode metadata; FourCC constants for probed/decoded format.                                                                                                    |
+| `ErrUnknownFormat`, `ErrSrcTooLarge`, `ErrDecode`                         | Sentinel errors.                                                                                                                                                |
+| `ErrBadImage`                                                             | `dst` Rect/Stride/Pix do not match the decoded image (empty/nil/size mismatch).                                                                                 |
+| `ErrDstTooSmall`                                                          | Sentinel for a destination too small (host layout or guest scratch).                                                                                            |
+| `*DstTooSmallError`                                                       | Structured error with required buffer size and image dimensions; matches `ErrDstTooSmall`.                                                                      |
 
 A `Decoder` is not safe for concurrent use. Use one decoder per goroutine, or serialize access.
 

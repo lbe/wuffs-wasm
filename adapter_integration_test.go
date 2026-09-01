@@ -80,6 +80,81 @@ func TestIntegrationDecodeReaderByteParity(t *testing.T) {
 	}
 }
 
+// TestIntegrationDecodeReaderBMPParity pins the BMP FourCC mapping end-to-end:
+// DecodeReader must report the canonical "bmp" format and return pixels
+// identical to the direct Decode path for the bricks-color.bmp fixture.
+func TestIntegrationDecodeReaderBMPParity(t *testing.T) {
+	src := loadFixture(t, "bricks-color.bmp")
+	want, _, err := wuffs.Decode(src)
+	if err != nil {
+		t.Fatalf("Decode fixture: %v", err)
+	}
+	gotImage, gotFormat, err := wuffs.DecodeReader(&chunkedReader{data: append([]byte(nil), src...), chunk: 3})
+	if err != nil {
+		t.Fatalf("DecodeReader: %v", err)
+	}
+	got, ok := gotImage.(*image.RGBA)
+	if !ok {
+		t.Fatalf("DecodeReader image type = %T, want *image.RGBA", gotImage)
+	}
+	if gotFormat != "bmp" {
+		t.Errorf("format = %q, want %q", gotFormat, "bmp")
+	}
+	if !got.Bounds().Eq(want.Bounds()) || got.Stride != want.Stride || !bytes.Equal(got.Pix, want.Pix) {
+		t.Error("DecodeReader image differs from Decode image")
+	}
+}
+
+// TestIntegrationDecodeReaderGIFParity pins the GIF FourCC mapping end-to-end:
+// DecodeReader must report the canonical "gif" format and return pixels
+// identical to the direct Decode path for the bricks-nodither.gif fixture.
+func TestIntegrationDecodeReaderGIFParity(t *testing.T) {
+	src := loadFixture(t, "bricks-nodither.gif")
+	want, _, err := wuffs.Decode(src)
+	if err != nil {
+		t.Fatalf("Decode fixture: %v", err)
+	}
+	gotImage, gotFormat, err := wuffs.DecodeReader(&chunkedReader{data: append([]byte(nil), src...), chunk: 3})
+	if err != nil {
+		t.Fatalf("DecodeReader: %v", err)
+	}
+	got, ok := gotImage.(*image.RGBA)
+	if !ok {
+		t.Fatalf("DecodeReader image type = %T, want *image.RGBA", gotImage)
+	}
+	if gotFormat != "gif" {
+		t.Errorf("format = %q, want %q", gotFormat, "gif")
+	}
+	if !got.Bounds().Eq(want.Bounds()) || got.Stride != want.Stride || !bytes.Equal(got.Pix, want.Pix) {
+		t.Error("DecodeReader image differs from Decode image")
+	}
+}
+
+// TestIntegrationDecodeReaderJPEGParity pins the JPEG FourCC mapping end-to-end:
+// DecodeReader must report the canonical "jpeg" format and return pixels
+// identical to the direct Decode path for the hat.jpeg fixture.
+func TestIntegrationDecodeReaderJPEGParity(t *testing.T) {
+	src := loadFixture(t, "hat.jpeg")
+	want, _, err := wuffs.Decode(src)
+	if err != nil {
+		t.Fatalf("Decode fixture: %v", err)
+	}
+	gotImage, gotFormat, err := wuffs.DecodeReader(&chunkedReader{data: append([]byte(nil), src...), chunk: 3})
+	if err != nil {
+		t.Fatalf("DecodeReader: %v", err)
+	}
+	got, ok := gotImage.(*image.RGBA)
+	if !ok {
+		t.Fatalf("DecodeReader image type = %T, want *image.RGBA", gotImage)
+	}
+	if gotFormat != "jpeg" {
+		t.Errorf("format = %q, want %q", gotFormat, "jpeg")
+	}
+	if !got.Bounds().Eq(want.Bounds()) || got.Stride != want.Stride || !bytes.Equal(got.Pix, want.Pix) {
+		t.Error("DecodeReader image differs from Decode image")
+	}
+}
+
 func TestIntegrationDecodeReaderErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name string
