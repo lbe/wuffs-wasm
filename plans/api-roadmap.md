@@ -104,18 +104,19 @@ guest memory internally.
 
 ## Work registry
 
-| ID          | Capability                                                                            | Plan type | Plan file                                         | Depends on          | Guest changes | Status        |
-| ----------- | ------------------------------------------------------------------------------------- | --------- | ------------------------------------------------- | ------------------- | ------------- | ------------- |
-| `CORE-01`   | Explicit `Reserve` semantics                                                          | TDD       | `.pi/tdd-plans/enforce-explicit-reserve.yaml`     | Current baseline    | No            | `Complete`    |
-| `CORE-02`   | Remove accidental public exports                                                      | Runbook   | `plans/core-02-public-api-boundary.md`            | `CORE-01`           | No            | `Complete`    |
-| `STILL-01`  | `DecodeNRGBA` and `DecodeGray`                                                        | TDD       | `.pi/tdd-plans/still-01-decode-destinations.yaml` | `CORE-02`           | No            | `Complete`    |
-| `CONV-01`   | Package-level allocating decode helpers                                               | Runbook   | `plans/conv-01-adherence-remediation.md`          | `STILL-01`          | No            | `Complete`    |
-| `ADAPT-01`  | Reader and config adapters                                                            | TDD       | `.pi/tdd-plans/adapt-01-reader-adapters.yaml`     | `CONV-01`           | No            | `Complete`    |
-| `FORMAT-01` | Verify common-image batch: BMP, GIF, JPEG                                             | TDD       | `.pi/tdd-plans/format-01-common-images.yaml`      | `CORE-01`           | No            | `Complete`    |
-| `FORMAT-*`  | Verify additional image formats (deferred: ETC2, HNSM, NIE, NPBM, QOI, TGA, TH, WBMP) | TDD       | One plan per format or compatible format batch    | `CORE-01`           | As required   | `Not planned` |
-| `REG-01`    | Register verified formats                                                             | TDD       | To be created                                     | `ADAPT-01`, formats | No            | `Not planned` |
-| `ANIM-01`   | Animation APIs                                                                        | TDD       | To be created                                     | `CORE-02`           | Yes           | `Not planned` |
-| `META-01`   | Metadata APIs                                                                         | TDD       | To be created                                     | `CORE-02`           | Yes           | `Not planned` |
+| ID          | Capability                                                      | Plan type | Plan file                                         | Depends on          | Guest changes | Status        |
+| ----------- | --------------------------------------------------------------- | --------- | ------------------------------------------------- | ------------------- | ------------- | ------------- |
+| `CORE-01`   | Explicit `Reserve` semantics                                    | TDD       | `.pi/tdd-plans/enforce-explicit-reserve.yaml`     | Current baseline    | No            | `Complete`    |
+| `CORE-02`   | Remove accidental public exports                                | Runbook   | `plans/core-02-public-api-boundary.md`            | `CORE-01`           | No            | `Complete`    |
+| `STILL-01`  | `DecodeNRGBA` and `DecodeGray`                                  | TDD       | `.pi/tdd-plans/still-01-decode-destinations.yaml` | `CORE-02`           | No            | `Complete`    |
+| `CONV-01`   | Package-level allocating decode helpers                         | Runbook   | `plans/conv-01-adherence-remediation.md`          | `STILL-01`          | No            | `Complete`    |
+| `ADAPT-01`  | Reader and config adapters                                      | TDD       | `.pi/tdd-plans/adapt-01-reader-adapters.yaml`     | `CONV-01`           | No            | `Complete`    |
+| `FORMAT-01` | Verify common-image batch: BMP, GIF, JPEG                       | TDD       | `.pi/tdd-plans/format-01-common-images.yaml`      | `CORE-01`           | No            | `Complete`    |
+| `FORMAT-02` | Verify portable-image batch: NPBM, QOI, TGA, WBMP               | TDD       | `.pi/tdd-plans/format-02-portable-images.yaml`    | `CORE-01`           | Yes           | `Review`      |
+| `FORMAT-*`  | Verify additional image formats (deferred: ETC2, HNSM, NIE, TH) | TDD       | One plan per format or compatible format batch    | `CORE-01`           | As required   | `Not planned` |
+| `REG-01`    | Register verified formats                                       | TDD       | To be created                                     | `ADAPT-01`, formats | No            | `Not planned` |
+| `ANIM-01`   | Animation APIs                                                  | TDD       | To be created                                     | `CORE-02`           | Yes           | `Not planned` |
+| `META-01`   | Metadata APIs                                                   | TDD       | To be created                                     | `CORE-02`           | Yes           | `Not planned` |
 
 ## Dependency graph
 
@@ -134,7 +135,7 @@ Current caller-owned RGBA baseline
       |
     REG-01
 
-CORE-01 ──> FORMAT-* ──> REG-01
+CORE-01 ──> FORMAT-01, FORMAT-02 (FORMAT-*) ──> REG-01
 ```
 
 After `CORE-02`, the still-image, animation, and metadata tracks are technically
@@ -217,17 +218,17 @@ format set.
 
 ## API traceability
 
-| `API.md` area                       | Roadmap owner        |
-| ----------------------------------- | -------------------- |
-| Decoder lifecycle and reservation   | `CORE-01`            |
-| Public surface conformance          | `CORE-02`            |
-| RGBA/NRGBA/Gray decoder methods     | Baseline, `STILL-01` |
-| Package-level convenience functions | `CONV-01`            |
-| Reader/config adapters              | `ADAPT-01`           |
-| Format constants and support        | `FORMAT-*`           |
-| `RegisterFormats`                   | `REG-01`             |
-| Animation types and methods         | `ANIM-01`            |
-| Metadata types and method           | `META-01`            |
+| `API.md` area                       | Roadmap owner                         |
+| ----------------------------------- | ------------------------------------- |
+| Decoder lifecycle and reservation   | `CORE-01`                             |
+| Public surface conformance          | `CORE-02`                             |
+| RGBA/NRGBA/Gray decoder methods     | Baseline, `STILL-01`                  |
+| Package-level convenience functions | `CONV-01`                             |
+| Reader/config adapters              | `ADAPT-01`                            |
+| Format constants and support        | `FORMAT-01`, `FORMAT-02` (`FORMAT-*`) |
+| `RegisterFormats`                   | `REG-01`                              |
+| Animation types and methods         | `ANIM-01`                             |
+| Metadata types and method           | `META-01`                             |
 
 Every public symbol in `API.md` must map to the baseline or one roadmap ID. Add
 a roadmap entry before approving a child plan for an unmapped symbol.

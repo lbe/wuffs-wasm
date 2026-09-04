@@ -137,7 +137,11 @@ const (
 	FormatBMP   uint32 = 0x424D5020 // "BMP "
 	FormatGIF   uint32 = 0x47494620 // "GIF "
 	FormatJPEG  uint32 = 0x4A504547 // "JPEG"
+	FormatNPBM  uint32 = 0x4E50424D // "NPBM"
 	FormatPNG   uint32 = 0x504E4720 // "PNG "
+	FormatQOI   uint32 = 0x514F4920 // "QOI "
+	FormatTGA   uint32 = 0x54474120 // "TGA "
+	FormatWBMP  uint32 = 0x57424D50 // "WBMP"
 	FormatWEBP  uint32 = 0x57454250 // "WEBP"
 )
 ```
@@ -345,11 +349,11 @@ func DecodeReader(r io.Reader) (image.Image, string, error)
 `DecodeReader` reads `r` fully to EOF into a `[]byte`, then delegates to the
 allocating `Decode` helper. It returns a newly allocated `*image.RGBA` as an
 `image.Image`, together with the canonical format name (`"png"`, `"webp"`,
-`"bmp"`, `"gif"`, or `"jpeg"`) for the verified formats. Reader errors and
-decode errors retain their exact identity; failures return a nil image and an
-empty format. Full buffering and image allocation are intentional. The adapter
-does not register formats with the standard library's global image decoder
-registry.
+`"bmp"`, `"gif"`, `"jpeg"`, `"npbm"`, `"qoi"`, `"tga"`, or `"wbmp"`) for
+the verified formats. Reader errors and decode errors retain their exact
+identity; failures return a nil image and an empty format. Full buffering and
+image allocation are intentional. The adapter does not register formats with
+the standard library's global image decoder registry.
 
 ```go
 func DecodeConfigReader(r io.Reader) (image.Config, error)
@@ -369,6 +373,25 @@ func RegisterFormats()
 ```
 
 `RegisterFormats` will provide explicit opt-in registration.
+
+### Verified format subsets
+
+The verified nine-format set is PNG, WebP, BMP, GIF, JPEG, NPBM, QOI, TGA, and
+WBMP. Three formats are verified on documented subsets:
+
+- **NPBM** supports binary PGM P5 and PPM P6 with Maxval exactly 255 or 65535;
+  all other maxima are unsupported.
+- **TGA** supports indexed types 1 and 9 with 8-bit indices and 15-, 24-, or 32-bit
+  palettes, true-color types 2 and 10 at 15, 16, 24, or 32 bits, and
+  grayscale types 3 and 11 at 8 bits. Indexed palettes must start at entry zero
+  and contain 1 to 256 entries; true-color and grayscale images must have no color map;
+  interleaving and right-to-left origins are not permitted; either
+  vertical origin is supported; attribute bits are 0 for indexed, 15-, 16-,
+  and 24-bit true-color and 8-bit grayscale, and 8 for 32-bit true-color.
+  Indexed 16-bit palettes and 15- or 16-bit true-color with one attribute bit
+  are unsupported.
+- **WBMP** supports Type 0 with canonical shortest-form dimension encodings
+  and nonzero dimensions no greater than 0xFFFFFF.
 
 ---
 

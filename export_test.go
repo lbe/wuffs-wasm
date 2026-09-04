@@ -1,5 +1,7 @@
 package wuffs
 
+import "unsafe"
+
 // Exported for tests: exposes internal helpers so that tests in other packages
 // (or bench tests) can drive decoder behavior without widening the public API.
 
@@ -30,3 +32,38 @@ func SetInitialDstSlotBytes(n int) func() {
 // tests can assert destination-slot behavior without widening the public API or
 // exposing the complete memory layout.
 func CurrentDstSlotLen(d *Decoder) uint32 { return d.currentLayout.dstLen }
+
+// GuestMemoryState is a test-only snapshot of the complete wasm linear memory
+// and the decoder's slot layout. It is comparable, so tests can assert with a
+// single equality that a guest call left the wasm backing store, its byte
+// length, and every slot offset and size unchanged.
+type GuestMemoryState struct {
+	MemoryBase unsafe.Pointer // backing pointer of the wasm memory slice
+	MemoryLen  int            // byte length of the wasm memory slice
+	MetaOff    uint32         // currentLayout.metaOff
+	MetaLen    uint32         // currentLayout.metaLen
+	SrcOff     uint32         // currentLayout.srcOff
+	SrcLen     uint32         // currentLayout.srcLen
+	DstOff     uint32         // currentLayout.dstOff
+	DstLen     uint32         // currentLayout.dstLen
+	HostBase   uint32         // currentLayout.hostBase
+}
+
+// CaptureGuestMemoryState snapshots the complete wasm memory slice (backing
+// pointer via unsafe.SliceData and byte length) plus every field of the
+// decoder's current slot layout. It exists only behind _test.go so it never
+// widens the production API.
+func CaptureGuestMemoryState(d *Decoder) GuestMemoryState {
+	memBytes := *d.module.Xmemory().Slice()
+	return GuestMemoryState{
+		MemoryBase: unsafe.Pointer(unsafe.SliceData(memBytes)),
+		MemoryLen:  len(memBytes),
+		MetaOff:    d.currentLayout.metaOff,
+		MetaLen:    d.currentLayout.metaLen,
+		SrcOff:     d.currentLayout.srcOff,
+		SrcLen:     d.currentLayout.srcLen,
+		DstOff:     d.currentLayout.dstOff,
+		DstLen:     d.currentLayout.dstLen,
+		HostBase:   d.currentLayout.hostBase,
+	}
+}

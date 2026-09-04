@@ -19,6 +19,8 @@ All fixtures are copied from:
 
 - `bricks-color.bmp` - BMP test image; pixel-identical to `bricks-color.png`
 - `bricks-color.png` - PNG test image; oracle pair for `bricks-color.bmp`
+- `bricks-color.qoi` - QOI test image (160×120 RGB, sRGB colorspace); oracle
+  pair is `bricks-color.png`
 - `bricks-nodither.gif` - GIF (89a) test image; oracle pair is `bricks-nodither.png`
 - `bricks-nodither.png` - PNG test image; oracle pair for `bricks-nodither.gif`
 - `hat.jpeg` - baseline JPEG test image (90×112 RGB, no alpha)
@@ -32,11 +34,63 @@ All fixtures are copied from:
 - `bricks-color.lossless.webp` - WebP lossless test image
 - `alpha-pixels.png` - deterministic 3×1 PNG generated in-repository; its
   pixels are opaque, translucent, and fully transparent for NRGBA tests
+- `alpha-pixels.qoi` - deterministic 3×1 RGBA QOI generated in-repository with
+  the same opaque, translucent, and fully transparent straight-RGBA pixel
+  values as `alpha-pixels.png`
+- `hippopotamus.pgm` - Netpbm P5 (binary graymap) test image (36×28, maxval
+  255, single-byte samples) vendored from upstream
+- `hippopotamus.ppm` - Netpbm P6 (binary pixmap) test image (36×28, maxval
+  255, single-byte samples) vendored from upstream
+- `npbm-maxval65535.pgm` - deterministic 2×2 Netpbm P5 generated
+  in-repository; two-byte big-endian samples 0x0000, 0x0100, 0x8000, 0xFFFF
+- `npbm-maxval65535.ppm` - deterministic 2×2 Netpbm P6 generated
+  in-repository with R=G=B triples of the same two-byte big-endian samples as
+  the PGM, so P5 and P6 with equivalent sample values decode identically
+- `bricks-color.tga` - TGA test image (uncompressed true-color, 160×120,
+  24-bit BGR, no alpha); oracle pair is `bricks-color.png`
+- `bricks-nodither.tga` - TGA test image (indexed-color, 160×120, 256-entry
+  24-bit palette, 8-bit indices); oracle pair is `bricks-nodither.png`
+- `bricks-gray.tga` - TGA test image (grayscale RLE, type 11, 160×120,
+  8-bit samples); oracle pair is `bricks-gray.png`
+- `bricks-gray.png` - PNG test image; oracle pair for `bricks-gray.tga`
+- `muybridge-frame-000.wbmp` - WBMP Type 0 test image (30×20, single-byte
+  width and height varints); its bitmap bits are identical to frame 0 of
+  `muybridge.gif` thresholded at luminance 128 (verified against the standard
+  library's `image/gif` decoder)
+- `bricks-nodither.wbmp` - WBMP Type 0 test image (160×120, two-byte width
+  varint, single-byte height varint); generated from `bricks-nodither.png` by
+  `../wuffs/script/convert-png-to-wbmp.go` with the same gray-threshold
+  semantics (bit set when luminance ≥ 128), oracle pair is `bricks-nodither.png`
 
 ## Verified formats
 
-- PNG, WebP, BMP, GIF, and JPEG are the verified public format set, each
-  backed by fixtures and integration coverage in this directory.
+- PNG, WebP, BMP, GIF, JPEG, NPBM, QOI, TGA, and WBMP are the verified
+  public format set, each backed by fixtures and integration coverage in this
+  directory.
+- Netpbm (PBM/PGM/PPM) is verified via the P5/P6 fixtures above;
+  `TestIntegrationNPBMDecodeCharacterization` pins the FormatNPBM contract,
+  exact RGBA pixels, unsupported magic-number/maxval rejection, and
+  `TestIntegrationNPBMDecodeRGBAAllocsPerRun` pins zero-allocation decode.
+- QOI is verified via the RGB `bricks-color.qoi` fixture (oracle: the
+  `bricks-color.png` pixels) and the RGBA `alpha-pixels.qoi` fixture;
+  `TestIntegrationQOIDecodeCharacterization` pins the FormatQOI contract and
+  exact straight RGBA pixels, and `TestIntegrationQOIDecodeRGBAAllocsPerRun`
+  pins zero-allocation decode.
+- TGA is verified via the true-color `bricks-color.tga`, indexed-color
+  `bricks-nodither.tga`, and grayscale/RLE `bricks-gray.tga` fixtures (oracles:
+  the corresponding PNG pixels) plus deterministic in-test fixtures covering
+  the complete conservative type/depth/origin/attribute matrix;
+  `TestIntegrationTGADecodeCharacterization` pins the FormatTGA contract,
+  exact pixels, unsupported-subset rejection, and collision behavior, and
+  `TestIntegrationTGADecodeRGBAAllocsPerRun` pins zero-allocation decode.
+- WBMP (Type 0) is verified via the single-byte-dimension
+  `muybridge-frame-000.wbmp` (30×20) and the multi-byte-width
+  `bricks-nodither.wbmp` (160×120) fixtures; the in-test oracle unpacks the
+  fixture bitmap bits directly (independent of the wasm decoder) and is pinned
+  below by CRC-32, and `TestIntegrationWBMPDecodeCharacterization` pins the
+  FormatWBMP contract, exact black-and-white pixels, the canonical-varint
+  header matrix, and collision behavior, and
+  `TestIntegrationWBMPDecodeRGBAAllocsPerRun` pins zero-allocation decode.
 
 ## Checksums
 
@@ -47,3 +101,13 @@ value (0x2298F3CA / 580449226) and the NIA encoder's oracle value for
 implemented directly from the Wuffs NIE/NIA specification and cross-checked
 against the standard library's `image/png` decoder; neither was obtained from
 this package's wasm decoder.
+
+The WBMP oracles: the expected decoded RGBA pixels of `muybridge-frame-000.wbmp`
+and `bricks-nodither.wbmp` have CRC-32 (IEEE) 0x339C150B (30×20, 2400 bytes)
+and 0xDDBF25F3 (160×120, 76800 bytes). Both values were produced by an
+independent decoder - the Wuffs v0.4 release C library
+(`../wuffs-mirror-release-c/release/c/wuffs-v0.4.c`) compiled with gcc -
+and reproduced bit-for-bit by the in-test WBMP bit unpacker; neither was
+obtained from this package's wasm decoder. The black/white pixels (RGBA
+{0,0,0,255} and {255,255,255,255}) are byte-identical in straight-RGBA and
+premultiplied layout.

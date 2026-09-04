@@ -55,6 +55,43 @@ func TestUnitReaderFormatNames(t *testing.T) {
 	}
 }
 
+func TestUnitFormatNamesFORMAT02(t *testing.T) {
+	// FORMAT-02 adds four canonical names to the reader adapter mapper. The
+	// table also re-pins the five pre-existing mappings and the unknown-FourCC
+	// error contract so the mapper's full behavior stays a single observable
+	// outcome.
+	tests := []struct {
+		name    string
+		fourCC  uint32
+		want    string
+		wantErr error
+	}{
+		{name: "PNG preserved", fourCC: FormatPNG, want: "png"},
+		{name: "WebP preserved", fourCC: FormatWEBP, want: "webp"},
+		{name: "BMP preserved", fourCC: FormatBMP, want: "bmp"},
+		{name: "GIF preserved", fourCC: FormatGIF, want: "gif"},
+		{name: "JPEG preserved", fourCC: FormatJPEG, want: "jpeg"},
+		{name: "NPBM", fourCC: FormatNPBM, want: "npbm"},
+		{name: "QOI", fourCC: FormatQOI, want: "qoi"},
+		{name: "TGA", fourCC: FormatTGA, want: "tga"},
+		{name: "WBMP", fourCC: FormatWBMP, want: "wbmp"},
+		{name: "unknown", fourCC: 0x12345678, wantErr: ErrUnknownFormat},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := formatName(tt.fourCC)
+			if got != tt.want {
+				t.Errorf("formatName(0x%08X) name = %q, want %q", tt.fourCC, got, tt.want)
+			}
+			//nolint:errorlint // exact sentinel identity is part of the adapter contract
+			if err != tt.wantErr {
+				t.Errorf("formatName(0x%08X) error = %v, want exact %v", tt.fourCC, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestUnitFormatNameBMP(t *testing.T) {
 	// The BMP FourCC must map to the canonical standard-library adapter name
 	// "bmp" with no error. The mapper currently lacks a BMP case, so this

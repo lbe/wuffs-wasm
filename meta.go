@@ -22,8 +22,9 @@ type Meta struct {
 	Stride       uint32
 	BytesWritten uint32
 	// Format is the decoded image format FourCC (e.g. FormatPNG, FormatWEBP,
-	// FormatBMP, FormatGIF, FormatJPEG),
-	// written by the guest into the meta slot. Zero until populated.
+	// FormatBMP, FormatGIF, FormatJPEG, FormatNPBM, FormatQOI, FormatTGA,
+	// FormatWBMP), written by the guest into the meta slot. Zero until
+	// populated.
 	Format uint32
 }
 
@@ -38,6 +39,15 @@ const (
 	FormatGIF uint32 = 0x47494620
 	// FormatJPEG is the FourCC for JPEG images (WUFFS_BASE__FOURCC__JPEG).
 	FormatJPEG uint32 = 0x4A504547
+	// FormatNPBM is the FourCC for Netpbm (PBM/PGM/PPM) images
+	// (WUFFS_BASE__FOURCC__NPBM).
+	FormatNPBM uint32 = 0x4E50424D
+	// FormatQOI is the FourCC for QOI images (WUFFS_BASE__FOURCC__QOI).
+	FormatQOI uint32 = 0x514F4920
+	// FormatTGA is the FourCC for TGA images (WUFFS_BASE__FOURCC__TGA).
+	FormatTGA uint32 = 0x54474120
+	// FormatWBMP is the FourCC for WBMP images (WUFFS_BASE__FOURCC__WBMP).
+	FormatWBMP uint32 = 0x57424D50
 )
 
 // readMeta reads the Meta struct from the guest meta slot at the given offset

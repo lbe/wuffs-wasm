@@ -49,6 +49,148 @@ static uint32_t read_u32le(const uint8_t* p) {
          ((uint32_t)p[3] << 24);
 }
 
+// TGA has no reliable magic bytes, so the fallback is a conservative parse of
+// the complete 18-byte header, applied only after all signature-bearing
+// formats have been checked. Only the supported subset is recognized here
+// (broader headers the Wuffs targa decoder might accept stay outside the API
+// boundary): image types 1 and 9 (indexed color) with color-map type 1,
+// first-entry index 0, length 1..256, entry depth 15/24/32, and 8-bit index
+// depth; image types 2 and 10 (true color) with color-map type 0, zeroed
+// color-map fields, and pixel depth 15/16/24/32; and image types 3 and 11
+// (grayscale) with color-map type 0, zeroed color-map fields, and pixel depth
+// 8. Width and height must be nonzero. The descriptor must have interleave
+// bits 6-7 and the right-to-left bit 4 clear (vertical-origin bit 5 is free),
+// and attribute bits 0-3 must be 0 for every class except 32-bit true color,
+// which requires 8. Recognition depends only on these structural header
+// fields; image ID, color-map, and pixel payload availability is validated by
+// the Wuffs targa decoder, not by this sniff.
+static int sniff_tga(const uint8_t* src, uint32_t len) {
+  if (len < 18) {
+    return 0;
+  }
+
+  uint32_t width = (uint32_t)src[12] | ((uint32_t)src[13] << 8);
+  uint32_t height = (uint32_t)src[14] | ((uint32_t)src[15] << 8);
+  if (width == 0 || height == 0) {
+    return 0;
+  }
+
+  uint8_t cmap_type = src[1];
+  uint8_t img_type = src[2];
+  uint16_t cmap_len = (uint16_t)src[5] | ((uint16_t)src[6] << 8);
+  uint8_t depth = src[16];
+  uint8_t desc = src[17];
+
+  switch (img_type) {
+    case 1:
+    case 9:
+      // Indexed color: color-map type 1, first-entry index 0, length 1..256,
+      // entry depth 15/24/32, index depth 8. Wuffs validates that the color
+      // map itself is present in the payload.
+      if (cmap_type != 1 || src[3] != 0 || src[4] != 0) {
+        return 0;
+      }
+      if (cmap_len < 1 || cmap_len > 256) {
+        return 0;
+      }
+      if (src[7] != 15 && src[7] != 24 && src[7] != 32) {
+        return 0;
+      }
+      if (depth != 8) {
+        return 0;
+      }
+      break;
+    case 2:
+    case 3:
+    case 10:
+    case 11:
+      // True color (2/10) and grayscale (3/11): color-map type 0 with all
+      // color-map fields zeroed. Only the pixel-depth rule differs below.
+      if (cmap_type != 0 || src[3] != 0 || src[4] != 0 || src[5] != 0 ||
+          src[6] != 0 || src[7] != 0) {
+        return 0;
+      }
+      break;
+    default:
+      return 0;
+  }
+
+  // Pixel depth: true color (2/10) is 15/16/24/32; grayscale (3/11) is 8.
+  // Indexed classes (1/9) checked depth 8 inside the switch above.
+  if ((img_type == 2 || img_type == 10) &&
+      depth != 15 && depth != 16 && depth != 24 && depth != 32) {
+    return 0;
+  }
+  if ((img_type == 3 || img_type == 11) && depth != 8) {
+    return 0;
+  }
+
+  // Descriptor: right-to-left origin (bit 4) and interleave (bits 6-7) must
+  // be clear; vertical-origin bit 5 is unrestricted. Attribute bits 0-3 must
+  // be 0 for every class except 32-bit true color, which requires 8.
+  if (desc & 0xD0) {
+    return 0;
+  }
+  uint8_t want_attr = 0;
+  if ((img_type == 2 || img_type == 10) && depth == 32) {
+    want_attr = 8;
+  }
+  if ((desc & 0x0F) != want_attr) {
+    return 0;
+  }
+
+  return 1;
+}
+
+// WBMP Type 0 has no literal magic bytes: valid files begin with TypeField
+// and FixHeaderField zero bytes, followed by canonical width and height
+// multi-byte integers, each an unsigned base-128 varint with the
+// most-significant 7-bit group first, the continuation bit set on every
+// non-final byte and clear on the final byte, and the shortest encoding only
+// (the leading group must be nonzero). Dimension zero is rejected, as are
+// values above 0xFF_FFFF (16,777,215, whose minimal encoding is
+// {87,FF,FF,7F}). Because the header itself is the signature, it is checked
+// only after all literal-signature formats and the conservative TGA
+// fallback have been given a chance.
+static int sniff_wbmp(const uint8_t* src, uint32_t len) {
+  if (len < 4 || src[0] != 0 || src[1] != 0) {
+    return 0;
+  }
+
+  uint32_t i = 2;
+  for (uint32_t dim = 0; dim < 2; dim++) {
+    uint32_t val = 0;
+    uint32_t groups = 0;
+    for (;;) {
+      if (i >= len) {
+        return 0;  // truncated multi-byte integer
+      }
+      uint8_t c = src[i++];
+      groups++;
+      // The largest allowed dimension needs exactly four groups; a fifth
+      // group can never be part of a shortest, in-range encoding.
+      if (groups > 4) {
+        return 0;
+      }
+      // Shortest encoding: the leading group's 7-bit value must be nonzero.
+      // Only 0x80 (continuation bit set, value bits clear) violates that; a
+      // leading 0x00 terminates immediately and is rejected below.
+      if (groups == 1 && c == 0x80) {
+        return 0;
+      }
+      val = (val << 7) | (uint32_t)(c & 0x7F);
+      if (c & 0x80) {
+        continue;
+      }
+      if (val == 0 || val > 0x00FFFFFF) {
+        return 0;
+      }
+      break;
+    }
+  }
+  return 1;
+}
+
 static uint32_t sniff_fourcc(const uint8_t* src, uint32_t len) {
   if (len >= 2 && src[0] == 'B' && src[1] == 'M') {
     return WUFFS_BASE__FOURCC__BMP;
@@ -74,10 +216,6 @@ static uint32_t sniff_fourcc(const uint8_t* src, uint32_t len) {
       src[3] == 'f') {
     return WUFFS_BASE__FOURCC__QOI;
   }
-  if (len >= 4 && src[0] == 'w' && src[1] == 'B' && src[2] == 'M' &&
-      src[3] == 'P') {
-    return WUFFS_BASE__FOURCC__WBMP;
-  }
   if (len >= 4 && read_u32le(src) == 0x6E696541) {  // "nïA" little-endian
     return WUFFS_BASE__FOURCC__NIE;
   }
@@ -90,10 +228,6 @@ static uint32_t sniff_fourcc(const uint8_t* src, uint32_t len) {
   if (len >= 2 && src[0] == 'P' && src[1] == '6') {
     return WUFFS_BASE__FOURCC__NPBM;
   }
-  if (len >= 18 && src[0] == 0 && src[1] == 0 && src[16] == 0x20 &&
-      src[17] == 0) {
-    return WUFFS_BASE__FOURCC__TGA;
-  }
   if (len >= 4 && src[0] == 0x13 && src[1] == 0xAB && src[2] == 0xA1 &&
       src[3] == 0x5C) {
     return WUFFS_BASE__FOURCC__ETC2;
@@ -105,6 +239,12 @@ static uint32_t sniff_fourcc(const uint8_t* src, uint32_t len) {
   if (len >= 5 && src[0] == 0xFF && src[1] == 0xFF && src[2] == 0xFF &&
       src[3] == 0xFF && src[4] == 0xFF) {
     return WUFFS_BASE__FOURCC__TH;
+  }
+  if (sniff_tga(src, len)) {
+    return WUFFS_BASE__FOURCC__TGA;
+  }
+  if (sniff_wbmp(src, len)) {
+    return WUFFS_BASE__FOURCC__WBMP;
   }
   return 0;
 }
