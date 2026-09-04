@@ -46,8 +46,7 @@ const (
 //     zero bytes, bytes 0x00 through 0x11, ELF bytes) - stays
 //     ErrUnknownFormat.
 //   - The exact higher-priority fixtures (PNG, WebP, BMP, GIF, JPEG, QOI,
-//     PGM, PPM, TGA) still probe with their own FourCC, and the ETC2, HNSM,
-//     NIE, and TH signature-marker sentinels retain ErrDecode.
+//     PGM, PPM, TGA) still probe with their own FourCC.
 //
 // The recognizer needs no literal magic string: valid Type 0 files begin with
 // TypeField and FixHeaderField zero bytes, so sniffing routes the two-byte
@@ -215,31 +214,6 @@ func TestIntegrationWBMPDecodeCharacterization(t *testing.T) {
 					t.Errorf("Probe(%s) Format = 0x%08X, want 0x%08X", fc.file, meta.Format, fc.wantFourCC)
 				}
 			})
-		}
-	})
-
-	t.Run("ETC2 HNSM NIE and TH sentinels retain ErrDecode", func(t *testing.T) {
-		sentinels := []struct {
-			name string
-			src  []byte
-		}{
-			{"ETC2 signature", []byte{0x13, 0xAB, 0xA1, 0x5C}},
-			{"HNSM signature", []byte{'H', 'N', 'S', 'M'}},
-			{"NIE little-endian FourCC", []byte{0x41, 0x65, 0x69, 0x6E}},
-			{"TH signature", []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF}},
-		}
-		d := wuffs.New()
-		if err := wuffs.RequiredReserve(d, 160*120*4, 16); err != nil {
-			t.Fatalf("RequiredReserve: %v", err)
-		}
-		for _, sc := range sentinels {
-			meta, err := d.Probe(sc.src)
-			if !errors.Is(err, wuffs.ErrDecode) {
-				t.Errorf("Probe(%s) error = %v, want ErrDecode (not FormatWBMP, not ErrUnknownFormat)", sc.name, err)
-			}
-			if meta != nil {
-				t.Errorf("Probe(%s) returned non-nil Meta %+v, want nil", sc.name, meta)
-			}
 		}
 	})
 }

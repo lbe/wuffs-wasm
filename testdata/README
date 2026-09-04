@@ -61,12 +61,114 @@ All fixtures are copied from:
   varint, single-byte height varint); generated from `bricks-nodither.png` by
   `../wuffs/script/convert-png-to-wbmp.go` with the same gray-threshold
   semantics (bit set when luminance ≥ 128), oracle pair is `bricks-nodither.png`
+- `bricks-color.etc1.pkm` - ETC1 PKM test image (160×120, RGB, PKM v0x10
+  format 0x0000), vendored from `../wuffs/test/data`
+- `bricks-color.etc1s.pkm` - ETC1S PKM test image (160×120, RGB, PKM v0x10
+  format 0x0000; ETC1S is the ETC1 block encoding used by Basis Universal,
+  produced by nigeltao's custom etc1tool), vendored from `../wuffs/test/data`
+- `bricks-color.etc2.pkm` - ETC2 PKM test image (160×120, RGB, PKM v0x20
+  format 0x0001), vendored from `../wuffs/test/data`
+- `mona-lisa.21x32.etc2.pkm` - ETC2 PKM test image (21×32, RGB, PKM v0x20
+  format 0x0001; the 24×32 extended canvas is cropped to the original 21×32
+  geometry, exercising non-multiple-of-four dimensions), vendored from
+  `../wuffs/test/data`
+- `hippopotamus.masked-with-muybridge.etc2.bgra-binary.pkm` - ETC2 PKM test
+  image (36×28, one-bit alpha, PKM v0x20 format 0x0004), vendored from
+  `../wuffs/test/data`
+- `hippopotamus.masked-with-muybridge.etc2.bgra-nonpremul.pkm` - ETC2 PKM
+  test image (36×28, full non-premultiplied alpha, PKM v0x20 format 0x0003),
+  vendored from `../wuffs/test/data`
+- `etc2.golden.manifest` - small golden manifest selecting the six vendored
+  PKM fixtures and recording each fixture's reported dimensions, its PKM
+  variant, and the canonical CRC-32 (IEEE) of its decoded straight RGBA
+  pixels (see Checksums below)
+- `49.bn4.nie` - NIE still image (16×16, v1-bn4: non-premultiplied BGRA, 4
+  bytes per pixel), vendored from `../wuffs/test/data`
+- `49.bn8.nie` - NIE still image (16×16, v1-bn8: non-premultiplied BGRA, 8
+  bytes per pixel / 16-bit channels), vendored from `../wuffs/test/data`
+- `49.bp4.nie` - NIE still image (16×16, v1-bp4: premultiplied BGRA, 4 bytes
+  per pixel), vendored from `../wuffs/test/data`
+- `49.bp8.nie` - NIE still image (16×16, v1-bp8: premultiplied BGRA, 8 bytes
+  per pixel / 16-bit channels), vendored from `../wuffs/test/data`
+- `crude-flag.nie` - NIE still image (3×2, v1-bn4), the worked example from
+  `../wuffs/doc/spec/nie-spec.md`: blue, white and red columns, all opaque
+- `hippopotamus.nie` - NIE still image (36×28, v1-bn4), vendored from
+  `../wuffs/test/data`
+- `animated-red-blue.nia` - NIA animated container (64×48, v1-bn4, four
+  frames, LoopCount 3), vendored from `../wuffs/test/data`; FORMAT-03
+  verifies only frame-zero behavior
+- `nie.golden.manifest` - small golden manifest selecting the six NIE stills
+  plus the NIA container and recording reported dimensions, wire pixel
+  encoding, and the canonical CRC-32 (IEEE) of the independently derived
+  frame-zero straight RGBA pixels (see Checksums below)
+- `mona-lisa.21x32.th` - cooked ThumbHash image (23×32, no alpha, l_count 5,
+  portrait), vendored from `../wuffs/test/data`; named after its 21×32
+  source PNG, it decodes to 23×32 because the thumbhash dimension codes are
+  only 14/18/19/23/26/27/32
+- `1QcSHQRnh493V4dIh4eXh1h4kJUI.th` - cooked ThumbHash image (23×32, no
+  alpha, l_count 5, portrait), vendored from
+  `../wuffs/test/data/artificial-thumbhash`; an evanw/thumbhash reference
+  example cooked with the 3-byte "\xC3\xBE\xFE" magic
+- `2fcZFIB3iId_h3iJh4aIYJ2V8g.th` - cooked ThumbHash image (32×18, no alpha,
+  l_count 4, landscape), vendored from
+  `../wuffs/test/data/artificial-thumbhash`; the only l_count-4 fixture
+- `2IqDBQQnxnj0JoLYdM3f8ahpuDeHiHdwZw.th` - cooked ThumbHash image (32×32,
+  alpha, l_count 5, square), vendored from
+  `../wuffs/test/data/artificial-thumbhash`
+- `3OcRJYB4d3h_iIeHeEh3eIhw-j3A.th` - cooked ThumbHash image (32×23, no
+  alpha, l_count 5, landscape), vendored from
+  `../wuffs/test/data/artificial-thumbhash`; the canonical upstream
+  thumbhash C test pins its final pixel as 0xFF56632E
+- `3PcNNYSFeXh_d3eld0iHZoZgVwh2.th` - cooked ThumbHash image (32×23, no
+  alpha, l_count 5, landscape), vendored from
+  `../wuffs/test/data/artificial-thumbhash`
+- `HBkSHYSIeHiPiHh8eJd4eTN0EEQG.th` - cooked ThumbHash image (32×23, no
+  alpha, l_count 5, landscape), vendored from
+  `../wuffs/test/data/artificial-thumbhash`
+- `IQgSLYZ6iHePh4h1eFeHh4dwgwg3.th` - cooked ThumbHash image (32×23, no
+  alpha, l_count 5, landscape), vendored from
+  `../wuffs/test/data/artificial-thumbhash`
+- `VggKDYAW6lZvdYd6d2iZh_p4GE_k.th` - cooked ThumbHash image (32×23, no
+  alpha, l_count 5, landscape), vendored from
+  `../wuffs/test/data/artificial-thumbhash`
+- `YJqGPQw7sFlslqhFafSE-Q6oJ1h2iHB2Rw.th` - cooked ThumbHash image (32×32,
+  alpha, l_count 5, square), vendored from
+  `../wuffs/test/data/artificial-thumbhash`; the alpha twin of
+  `2IqDBQQnxnj0JoLYdM3f8ahpuDeHiHdwZw.th`
+- `th.golden.manifest` - small golden manifest selecting the ten cooked
+  ThumbHash fixtures above and recording reported dimensions, the alpha
+  presence, l_count, and landscape variant properties, and the canonical
+  CRC-32 (IEEE) of each fixture's decoded straight RGBA pixels (see Checksums
+  below)
 
 ## Verified formats
 
-- PNG, WebP, BMP, GIF, JPEG, NPBM, QOI, TGA, and WBMP are the verified
-  public format set, each backed by fixtures and integration coverage in this
-  directory.
+- PNG, WebP, BMP, GIF, JPEG, NPBM, QOI, TGA, WBMP, ETC2, HNSM, NIE, and TH
+  are the verified public format set, each backed by fixtures and integration
+  coverage in this directory.
+- ETC2 is verified via the six PKM fixtures above (ETC1, ETC1S, ETC2 RGB,
+  non-multiple-of-four 21×32 geometry, one-bit alpha, and full
+  non-premultiplied alpha); `TestIntegrationETC2DecodeCharacterization` pins
+  the FormatETC2 contract, exact dimensions and stride, the canonical
+  decoded-pixel CRCs, corrupt/truncated PKM rejection, and zero-allocation
+  decode.
+- NIE is verified via the four `49.*` v1 encodings (non-premultiplied and
+  premultiplied BGRA at 4 and 8 bytes per pixel), the spec's `crude-flag.nie`
+  example, `hippopotamus.nie`, and the `animated-red-blue.nia` nïA container;
+  `TestIntegrationNIEDecodeCharacterization` pins the FormatNIE contract for
+  both the nïE and nïA signatures, exact frame-zero pixels against
+  independently derived RGBA oracles, ErrDecode for malformed frame-zero data,
+  ErrUnknownFormat for near-signature mutations including the byte-reversed
+  sentinel, and zero-allocation decode.
+- ThumbHash is verified via `mona-lisa.21x32.th` and the nine
+  `artificial-thumbhash` fixtures above, spanning alpha presence (0 and 1),
+  orientation (portrait, landscape, square), aspect ratio (18/32, 23/32,
+  32/23, 32/32), and encoded coefficient counts (l_count 4 and 5);
+  `TestIntegrationTHDecodeCharacterization` pins the FormatTH contract for
+  cooked files beginning "\xC3\xBE\xFE", exact Wuffs-derived dimensions,
+  canonical decoded-pixel CRCs, ErrDecode for truncated cooked files,
+  ErrUnknownFormat for raw payloads without the magic and for near-signature
+  mutations, and zero-allocation decode.
 - Netpbm (PBM/PGM/PPM) is verified via the P5/P6 fixtures above;
   `TestIntegrationNPBMDecodeCharacterization` pins the FormatNPBM contract,
   exact RGBA pixels, unsupported magic-number/maxval rejection, and
@@ -111,3 +213,46 @@ and reproduced bit-for-bit by the in-test WBMP bit unpacker; neither was
 obtained from this package's wasm decoder. The black/white pixels (RGBA
 {0,0,0,255} and {255,255,255,255}) are byte-identical in straight-RGBA and
 premultiplied layout.
+
+The ETC2 oracles: for each fixture selected by `etc2.golden.manifest`, the
+stored CRC-32 (IEEE) is over the width*height*4 straight RGBA bytes that the
+host writes into the caller's `image.RGBA` Pix. The values were produced by
+an independent C oracle program compiled against the same upstream Wuffs
+v0.4 release C library (`../wuffs-mirror-release-c/release/c/wuffs-v0.4.c`)
+embedded in the wasm guest, using the guest's own decode parameters
+(BGRA_PREMUL destination format, blend SRC) and converting to straight RGBA
+with the same B/R swap and `(c*255)/a` unpremultiply as the host's
+`convertBGRAToStraight`; none were obtained from this package's wasm decoder.
+The per-fixture values are listed in the manifest itself.
+
+The NIE oracles: for each fixture selected by `nie.golden.manifest`, the
+stored CRC-32 (IEEE) is over the width*height*4 straight RGBA bytes that the
+host writes into the caller's `image.RGBA` Pix for frame zero. The values and
+the in-test per-pixel oracle were derived directly from the NIE wire format
+per `../wuffs/doc/spec/nie-spec.md` and the Wuffs v0.4 pixel-swizzler
+arithmetic in `wuffs-mirror-release-c/release/c/wuffs-v0.4.c`
+(bn4: `color_u32_argb_nonpremul__as__color_u32_argb_premul`, bn8:
+`color_u64_argb_nonpremul__as__color_u32_argb_premul`, bp4: copy, bp8:
+`color_u64__as__color_u32` high bytes), mirrored by the B/R swap and
+unpremultiply `(c*255)/a` of the host's `convertBGRAToStraight`; none were
+obtained from this package's wasm decoder. The four `49.*` variants encode
+the same image, and bn8/bp4/bp8 decode to byte-identical straight RGBA while
+bn4's 8-bit non-premultiplied quantisation differs in 63 of 256 pixels.
+The per-fixture values are listed in the manifest itself.
+
+The ThumbHash oracles: for each fixture selected by `th.golden.manifest`,
+the stored CRC-32 (IEEE) is over the width*height*4 straight RGBA bytes that
+the host writes into the caller's `image.RGBA` Pix. The values were produced
+by an independent C oracle program compiled against the same upstream Wuffs
+v0.4 release C library (`../wuffs-mirror-release-c/release/c/wuffs-v0.4.c`)
+embedded in the wasm guest, using the guest's own decode parameters
+(BGRA_PREMUL destination format, blend SRC, workbuf = workbuf_len().max_incl)
+and converting to straight RGBA with the same B/R swap and `(c*255)/a`
+unpremultiply as the host's `convertBGRAToStraight`; none were obtained from
+this package's wasm decoder. The oracle was validated against the canonical
+upstream thumbhash C test's final-pixel value 0xFF56632E for
+`3OcRJYB4d3h_iIeHeEh3eIhw-j3A.th` (that test pins only the final pixel, not a
+whole-image CRC). The dimensions, has_alpha, l_count, and is_landscape
+variant properties were independently parsed from the payload header per
+`../wuffs/std/thumbhash/decode_thumbhash.wuffs`. The per-fixture values are
+listed in the manifest itself.

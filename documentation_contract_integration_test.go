@@ -3,22 +3,24 @@ package wuffs
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
 )
 
-// TestIntegrationVerifiedFormatDocumentationInventory pins the nine-format
+// TestIntegrationVerifiedFormatDocumentationInventory pins the thirteen-format
 // documentation contract: adapter.go DecodeReader GoDoc, API.md, README.md,
 // testdata/README, and plans/api-roadmap.md must consistently advertise
 // exactly FormatPNG, FormatWEBP, FormatBMP, FormatGIF, FormatJPEG,
-// FormatNPBM, FormatQOI, FormatTGA, and FormatWBMP as the verified public
-// format set; the NPBM binary P5/P6 exact-Maxval subset, the TGA
-// type/depth/palette/origin/attribute subset, and the WBMP Type 0 canonical
-// dimension subset described below in README.md and API.md; the remaining
-// deferred set ETC2, HNSM, NIE, and TH; FORMAT-02 in Review; and REG-01 as
-// future work.
+// FormatNPBM, FormatQOI, FormatTGA, FormatWBMP, FormatETC2, FormatHNSM,
+// FormatNIE, and FormatTH as the verified public format set; the NPBM binary
+// P5/P6 exact-Maxval subset, the TGA type/depth/palette/origin/attribute
+// subset, and the WBMP Type 0 canonical dimension subset described below in
+// README.md and API.md; HNSM identified as Handsum; NIE limited to still
+// images and frame zero; TH supporting only the cooked form while raw
+// ThumbHash is unsupported; FORMAT-03 in Review; and REG-01 as future work.
 func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -41,15 +43,12 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 	testdataReadme := read("testdata/README")
 	roadmap := read("plans/api-roadmap.md")
 
-	// The exact verified public set and the remaining deferred formats.
-	// Canonical reader names are lowercase; roadmap identifiers match the
-	// format constant names. FORMAT-02 verified the four portable formats.
-	acceptedNames := []string{"png", "webp", "bmp", "gif", "jpeg", "npbm", "qoi", "tga", "wbmp"}
-	acceptedIDs := []string{"FormatPNG", "FormatWEBP", "FormatBMP", "FormatGIF", "FormatJPEG", "FormatNPBM", "FormatQOI", "FormatTGA", "FormatWBMP"}
-	format02Names := []string{"npbm", "qoi", "tga", "wbmp"}
-	format02IDs := []string{"NPBM", "QOI", "TGA", "WBMP"}
-	deferredNames := []string{"etc2", "hnsm", "nie", "thumbhash"}
-	deferredIDs := []string{"ETC2", "HNSM", "NIE", "TH"}
+	// The complete verified set: every Wuffs image decoder the guest ships is
+	// verified. Canonical reader names are lowercase; roadmap identifiers
+	// match the format constant names. FORMAT-03 verified the remaining batch
+	// (ETC2, HNSM, NIE, TH), so nothing is deferred anymore.
+	acceptedNames := []string{"png", "webp", "bmp", "gif", "jpeg", "npbm", "qoi", "tga", "wbmp", "etc2", "hnsm", "nie", "th"}
+	acceptedIDs := []string{"FormatPNG", "FormatWEBP", "FormatBMP", "FormatGIF", "FormatJPEG", "FormatNPBM", "FormatQOI", "FormatTGA", "FormatWBMP", "FormatETC2", "FormatHNSM", "FormatNIE", "FormatTH"}
 
 	// NPBM, TGA, and WBMP support-subset phrases that README.md and API.md
 	// must both state verbatim: NPBM is binary PGM P5 and PPM P6 with Maxval
@@ -96,14 +95,43 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 		}
 		return notFound
 	}
-	requireNone := func(text string, subs []string) []string {
-		var found []string
-		for _, s := range subs {
-			if strings.Contains(text, s) {
-				found = append(found, s)
+
+	// acceptedWords precompiles a whole-word matcher per canonical name, so
+	// short names (notably "th" and "nie") never match inside unrelated
+	// words. Compiled once here, the per-text checks below stay free of
+	// regexp work.
+	acceptedWords := make(map[string]*regexp.Regexp, len(acceptedNames))
+	for _, name := range acceptedNames {
+		acceptedWords[name] = regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
+	}
+
+	// missingNames lists the canonical names absent from text as whole words.
+	missingNames := func(text string) []string {
+		var missing []string
+		for _, name := range acceptedNames {
+			if !acceptedWords[name].MatchString(text) {
+				missing = append(missing, name)
 			}
 		}
-		return found
+		return missing
+	}
+
+	// sameLine reports whether any single line of text carries every sub.
+	sameLine := func(text string, subs []string) bool {
+		for _, line := range strings.Split(text, "\n") {
+			lower := strings.ToLower(line)
+			ok := true
+			for _, s := range subs {
+				if !strings.Contains(lower, strings.ToLower(s)) {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				return true
+			}
+		}
+		return false
 	}
 
 	// checkExactSet fails unless present holds exactly the required names:
@@ -117,58 +145,50 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 		}
 		for name := range present {
 			if !slices.Contains(required, name) {
-				t.Errorf("%s must not %s %s outside the verified nine-format set", what, verb, name)
+				t.Errorf("%s must not %s %s outside the verified thirteen-format set", what, verb, name)
 			}
 		}
 	}
 
-	// hasCell reports whether any cell of cells contains sub.
-	hasCell := func(cells map[string]bool, sub string) bool {
-		for cell := range cells {
-			if strings.Contains(cell, sub) {
-				return true
-			}
-		}
-		return false
-	}
-
-	// adapter.go: the DecodeReader GoDoc must advertise exactly the nine
-	// canonical reader names, name none of the remaining deferred formats,
-	// and keep registration out of scope.
+	// adapter.go: the DecodeReader GoDoc must advertise exactly the thirteen
+	// canonical reader names and keep registration out of scope.
 	docStart := strings.Index(adapter, "// DecodeReader reads r to EOF")
 	funcStart := strings.Index(adapter, "func DecodeReader(")
 	if docStart < 0 || funcStart < 0 || funcStart <= docStart {
 		t.Fatal("adapter.go does not contain the expected DecodeReader GoDoc")
 	}
 	decoderGoDoc := strings.ToLower(adapter[docStart:funcStart])
-	if got := requireAll(decoderGoDoc, acceptedNames); len(got) > 0 {
-		t.Errorf("DecodeReader GoDoc must advertise the verified formats; missing %v", got)
-	}
-	if got := requireNone(decoderGoDoc, deferredNames); len(got) > 0 {
-		t.Errorf("DecodeReader GoDoc must not name deferred formats; found %v", got)
+	if got := missingNames(decoderGoDoc); len(got) > 0 {
+		t.Errorf("DecodeReader GoDoc must advertise every verified format; missing %v", got)
 	}
 	if !strings.Contains(decoderGoDoc, "does not register") {
 		t.Error("DecodeReader GoDoc must keep format registration out of scope")
 	}
 
-	// API.md: the DecodeReader section must advertise exactly the nine
-	// canonical reader names and must not present a deferred format as
-	// implemented.
+	// API.md: the DecodeReader section must advertise all thirteen canonical
+	// reader names.
 	secStart := strings.Index(api, "func DecodeReader(r io.Reader) (image.Image, string, error)")
 	secEnd := strings.Index(api, "func DecodeConfigReader(r io.Reader) (image.Config, error)")
 	if secStart < 0 || secEnd < 0 || secEnd <= secStart {
 		t.Fatal("API.md does not contain the expected DecodeReader section")
 	}
 	apiReaderSection := strings.ToLower(api[secStart:secEnd])
-	if got := requireAll(apiReaderSection, acceptedNames); len(got) > 0 {
-		t.Errorf("API.md reader section must advertise the verified formats; missing %v", got)
+	if got := missingNames(apiReaderSection); len(got) > 0 {
+		t.Errorf("API.md reader section must advertise every verified format; missing %v", got)
 	}
-	if got := requireNone(apiReaderSection, deferredNames); len(got) > 0 {
-		t.Errorf("API.md reader section must not present deferred formats as implemented; found %v", got)
+
+	// API.md: the verified format subsets section must state the full
+	// thirteen-format set.
+	subsetsStart := strings.Index(api, "### Verified format subsets")
+	if subsetsStart < 0 {
+		t.Fatal("API.md does not contain a Verified format subsets section")
+	}
+	if got := missingNames(strings.ToLower(api[subsetsStart:])); len(got) > 0 {
+		t.Errorf("API.md verified format subsets section must state the full thirteen-format set; missing %v", got)
 	}
 
 	// API.md: the image format FourCC constants block must declare exactly the
-	// nine verified format constants and no others.
+	// thirteen verified format constants and no others.
 	formatsIdx := strings.Index(api, "Image format FourCCs")
 	codeIdx := strings.Index(api[formatsIdx:], "```go")
 	if formatsIdx < 0 || codeIdx < 0 {
@@ -198,8 +218,10 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 		t.Errorf("API.md must keep RegisterFormats as future REG-01 work; missing %v", got)
 	}
 
-	// NPBM, TGA, and WBMP support subsets must be stated in both README.md
-	// and API.md.
+	// README.md and API.md must state the NPBM, TGA, and WBMP support
+	// subsets verbatim and must limit the FORMAT-03 formats: HNSM identified
+	// as Handsum, NIE as still images and frame zero only, and TH as only the
+	// cooked form with raw ThumbHash unsupported.
 	for file, text := range map[string]string{"README.md": readme, "API.md": api} {
 		if got := requireAll(text, npbmSubset); len(got) > 0 {
 			t.Errorf("%s must state the NPBM subset (%v) verbatim", file, got)
@@ -210,12 +232,20 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 		if got := requireAll(text, wbmpSubset); len(got) > 0 {
 			t.Errorf("%s must state the WBMP subset (%v) verbatim", file, got)
 		}
+		if !sameLine(text, []string{"hnsm", "handsum"}) {
+			t.Errorf("%s must identify HNSM as Handsum on one line", file)
+		}
+		if !sameLine(text, []string{"nie", "still", "frame zero"}) {
+			t.Errorf("%s must limit NIE to still images and frame zero on one line", file)
+		}
+		if !sameLine(text, []string{"thumbhash", "cooked", "raw", "unsupported"}) {
+			t.Errorf("%s must state that TH supports only the cooked form while raw ThumbHash is unsupported, on one line", file)
+		}
 	}
 
-	// README.md: the supported table must list exactly the nine verified
-	// formats, the not-yet-verified table must list the four remaining
-	// deferred formats and nothing verified by FORMAT-02, and the API table
-	// must name all nine format constants.
+	// README.md: the supported table must list exactly the thirteen verified
+	// formats, the not-yet-verified table must be empty (nothing is deferred),
+	// and the API table must name all thirteen format constants.
 	// firstColumn returns the first table cell of every data row in the named
 	// subsection, skipping the header row and its separator until the first
 	// separator row appears.
@@ -254,40 +284,43 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 	checkExactSet("README supported table", "list", supported, acceptedNames)
 
 	notVerified := firstColumn(readme, "Not yet verified")
-	for _, name := range deferredNames {
-		if !hasCell(notVerified, name) {
-			t.Errorf("README not-yet-verified table must keep the deferred format %s", name)
-		}
-	}
-	for _, name := range format02Names {
+	if len(notVerified) > 0 {
+		cells := make([]string, 0, len(notVerified))
 		for cell := range notVerified {
-			if strings.Contains(cell, name) {
-				t.Errorf("README not-yet-verified table must not list %s; FORMAT-02 verified it (cell %q)", name, cell)
-			}
+			cells = append(cells, cell)
 		}
+		slices.Sort(cells)
+		t.Errorf("README not-yet-verified table must be empty now that FORMAT-03 verified every remaining format; found %v", cells)
 	}
 
 	if got := requireAll(readme, acceptedIDs); len(got) > 0 {
 		t.Errorf("README API table must name the format constants %v", got)
 	}
 
-	// testdata/README: one inventory line must state the nine-format
+	// testdata/README: one inventory line must state the thirteen-format
 	// verified set.
 	verifiedLine := false
 	for _, line := range strings.Split(strings.ToLower(testdataReadme), "\n") {
-		if len(requireAll(line, acceptedNames)) == 0 {
+		seen := map[string]bool{}
+		for _, field := range strings.Fields(line) {
+			token := strings.Trim(field, ",.;:()[]|*\"'`")
+			if slices.Contains(acceptedNames, token) {
+				seen[token] = true
+			}
+		}
+		if len(seen) == len(acceptedNames) {
 			verifiedLine = true
 			break
 		}
 	}
 	if !verifiedLine {
-		t.Error("testdata/README must state the verified format set (PNG, WebP, BMP, GIF, JPEG, NPBM, QOI, TGA, WBMP) on one line")
+		t.Error("testdata/README must state the thirteen-format verified set (PNG, WebP, BMP, GIF, JPEG, NPBM, QOI, TGA, WBMP, ETC2, HNSM, NIE, TH) on one line")
 	}
 
-	// plans/api-roadmap.md: a distinct FORMAT-02 entry points to this plan
+	// plans/api-roadmap.md: a distinct FORMAT-03 entry points to this plan
 	// with dependency CORE-01, guest changes Yes, and status Review; the
-	// generic FORMAT-* entry remains Not planned and defers exactly ETC2,
-	// HNSM, NIE, and TH; REG-01 (RegisterFormats) remains Not planned.
+	// generic FORMAT-* entry is gone (no deferred formats remain); REG-01
+	// (RegisterFormats) remains Not planned.
 	regStart := strings.Index(roadmap, "## Work registry")
 	if regStart < 0 {
 		t.Fatal("api-roadmap.md does not contain a Work registry section")
@@ -306,28 +339,18 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 		return ""
 	}
 
-	if line := findLine(regBody, "FORMAT-02"); line == "" {
-		t.Error("api-roadmap.md registry must add a distinct FORMAT-02 portable-images entry")
+	if line := findLine(regBody, "FORMAT-03"); line == "" {
+		t.Error("api-roadmap.md registry must add a distinct FORMAT-03 remaining-images entry")
 	} else {
-		for _, want := range append([]string{"format-02-portable-images.yaml", "CORE-01", "Yes", "Review"}, format02IDs...) {
+		for _, want := range []string{"format-03-remaining-images.yaml", "CORE-01", "Yes", "Review", "ETC2", "HNSM", "NIE", "TH"} {
 			if !strings.Contains(line, want) {
-				t.Errorf("FORMAT-02 entry must mention %s; entry is: %s", want, line)
+				t.Errorf("FORMAT-03 entry must mention %s; entry is: %s", want, line)
 			}
 		}
 	}
 
-	if line := findLine(regBody, "FORMAT-*"); line == "" {
-		t.Error("api-roadmap.md registry must keep the generic FORMAT-* entry")
-	} else {
-		if !strings.Contains(line, "Not planned") {
-			t.Errorf("generic FORMAT-* entry must remain Not planned; entry is: %s", line)
-		}
-		if got := requireAll(line, deferredIDs); len(got) > 0 {
-			t.Errorf("FORMAT-* entry must defer %v; entry is: %s", got, line)
-		}
-		if got := requireNone(line, format02IDs); len(got) > 0 {
-			t.Errorf("FORMAT-* entry must not defer the FORMAT-02 formats %v; entry is: %s", got, line)
-		}
+	if line := findLine(regBody, "FORMAT-*"); line != "" {
+		t.Errorf("api-roadmap.md registry must replace the generic FORMAT-* entry with FORMAT-03; found: %s", line)
 	}
 
 	if line := findLine(regBody, "REG-01"); line == "" {

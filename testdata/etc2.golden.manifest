@@ -1,0 +1,21 @@
+# FORMAT-03 ETC2 golden manifest.
+#
+# Each line selects one vendored PKM fixture and records the canonical
+# decode evidence produced by the upstream Wuffs decoder
+# (wuffs-mirror-release-c/release/c/wuffs-v0.4.c, the exact decoder embedded
+# in the wasm guest) using the guest's decode parameters from wasm/shim.c:
+# pixel format BGRA_PREMUL, blend SRC, workbuf = workbuf_len().max_incl. The
+# CRC-32 (IEEE) is over the width*height*4 straight (non-premultiplied) RGBA
+# bytes the Go host writes into the caller's image.RGBA Pix, i.e. the raw
+# guest bytes with B and R swapped and each channel unpremultiplied via
+# (c*255)/a, matching convertBGRAToStraight. Values were computed by an
+# independent C oracle program against the upstream decoder; none were taken
+# from this package's own decoder.
+#
+# Columns: file width height straight_rgba_crc32 pkm_variant
+bricks-color.etc1.pkm 160 120 1473109472 ETC1_RGB
+bricks-color.etc1s.pkm 160 120 133114617 ETC1S
+bricks-color.etc2.pkm 160 120 1591528539 ETC2_RGB
+mona-lisa.21x32.etc2.pkm 21 32 2386654191 ETC2_RGB
+hippopotamus.masked-with-muybridge.etc2.bgra-binary.pkm 36 28 4212096358 ETC2_RGBA1
+hippopotamus.masked-with-muybridge.etc2.bgra-nonpremul.pkm 36 28 1849481479 ETC2_RGBA

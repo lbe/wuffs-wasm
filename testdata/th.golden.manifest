@@ -1,0 +1,44 @@
+# FORMAT-03 ThumbHash golden manifest.
+#
+# Each line selects one vendored cooked ThumbHash fixture: the 3-byte magic
+# "\xC3\xBE\xFE" (the 'þ' THORN identifier mandated by Wuffs'
+# decode_thumbhash.wuffs; QUIRK_JUST_RAW_THUMBHASH is disabled in the guest,
+# so the magic is required) followed by the raw thumbhash payload. The
+# canonical decode evidence was produced by the upstream Wuffs decoder
+# (wuffs-mirror-release-c/release/c/wuffs-v0.4.c, the exact decoder embedded
+# in the wasm guest) using the guest's decode parameters from wasm/shim.c:
+# pixel format BGRA_PREMUL, blend SRC, workbuf = workbuf_len().max_incl. The
+# CRC-32 (IEEE) is over the width*height*4 straight (non-premultiplied) RGBA
+# bytes the Go host writes into the caller's image.RGBA Pix, i.e. the raw
+# guest bytes with B and R swapped and each channel unpremultiplied via
+# (c*255)/a, matching convertBGRAToStraight. Values were computed by an
+# independent C oracle program against the upstream decoder; none were taken
+# from this package's own decoder. The oracle was validated against the
+# canonical upstream thumbhash C test's final-pixel value 0xFF56632E for
+# 3OcRJYB4d3h_iIeHeEh3eIhw-j3A.th.
+#
+# The has_alpha, l_count, and is_landscape columns are the variant properties
+# decoded from the payload header per decode_thumbhash.wuffs: has_alpha
+# selects 0 or 14 A AC coefficients, l_count selects the number of L AC
+# coefficients (3..=7), and is_landscape swaps the width and height codes.
+# Together they span the upstream fixtures' alpha presence (0 and 1),
+# orientation (portrait, landscape, square), aspect ratio (18/32, 23/32,
+# 32/23, 32/32), and encoded coefficient-count (4 and 5) variants.
+#
+# Fixtures come from ../wuffs/test/data/artificial-thumbhash (evanw/thumbhash
+# reference examples, cooked with the 3-byte Wuffs magic by the upstream
+# make.go) and ../wuffs/test/data/mona-lisa.21x32.th. The mona-lisa fixture
+# named "21x32" after its source PNG decodes to 23x32: thumbhash dimension
+# codes only offer 14/18/19/23/26/27/32, and 23 is the closest code above 21.
+#
+# Columns: file width height straight_rgba_crc32 has_alpha l_count is_landscape
+mona-lisa.21x32.th 23 32 728019323 0 5 0
+1QcSHQRnh493V4dIh4eXh1h4kJUI.th 23 32 2595489148 0 5 0
+2fcZFIB3iId_h3iJh4aIYJ2V8g.th 32 18 1675008562 0 4 1
+2IqDBQQnxnj0JoLYdM3f8ahpuDeHiHdwZw.th 32 32 1627052198 1 5 0
+3OcRJYB4d3h_iIeHeEh3eIhw-j3A.th 32 23 3723448717 0 5 1
+3PcNNYSFeXh_d3eld0iHZoZgVwh2.th 32 23 146379306 0 5 1
+HBkSHYSIeHiPiHh8eJd4eTN0EEQG.th 32 23 2562506926 0 5 1
+IQgSLYZ6iHePh4h1eFeHh4dwgwg3.th 32 23 2815227283 0 5 1
+VggKDYAW6lZvdYd6d2iZh_p4GE_k.th 32 23 35520861 0 5 1
+YJqGPQw7sFlslqhFafSE-Q6oJ1h2iHB2Rw.th 32 32 1735759642 1 5 0

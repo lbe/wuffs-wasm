@@ -1,0 +1,37 @@
+# FORMAT-03 NIE golden manifest.
+#
+# Each line selects one vendored NIE fixture and records its reported
+# dimensions, its wire pixel encoding, and the canonical CRC-32 (IEEE) of the
+# width*height*4 straight (non-premultiplied) RGBA bytes that the host writes
+# into the caller's image.RGBA Pix after the guest swizzle (wasm/shim.c:
+# destination pixel format BGRA_PREMUL, blend SRC, workbuf = workbuf_len()
+# max_incl with the 64 KiB fallback) and the host's documented
+# convertBGRAToStraight (B/R swap, unpremultiply (c*255)/a).
+#
+# The expected pixels are independently derived from the NIE wire format per
+# ../wuffs/doc/spec/nie-spec.md and the Wuffs v0.4 pixel-swizzler arithmetic
+# (wuffs-mirror-release-c/release/c/wuffs-v0.4.c): bn4 applies
+# color_u32_argb_nonpremul__as__color_u32_argb_premul's a*0x101*0x101
+# arithmetic, bn8 applies color_u64_argb_nonpremul__as__color_u32_argb_premul,
+# bp4 copies the premultiplied bytes, and bp8 takes each channel's high byte
+# via color_u64__as__color_u32 (NIE is little-endian BGRA, 4 or 8 bytes per
+# pixel). The animated-red-blue.nia value covers frame zero only (the 8-byte
+# CDD and inner NIE header are skipped; later frames are untouched).
+# None of the values were obtained from this package's wasm decoder;
+# decode_nie_integration_test.go reproduces the full derivation bit-for-bit
+# and asserts the per-pixel bytes, not just these CRCs.
+#
+# The four 49 encoding variants (bn4, bn8, bp4, bp8) encode the same 16x16
+# image: bn8/bp4/bp8 decode to byte-identical straight RGBA (the conversion
+# round-trips exactly) while bn4's 8-bit non-premultiplied quantisation
+# differs in 63 of 256 pixels. That is expected; each variant still exercises
+# its own 4- or 8-bytes-per-pixel wire path and its own premul semantics.
+#
+# Columns: file width height pixel_encoding straight_rgba_crc32
+49.bn4.nie 16 16 bn4 1131911976
+49.bn8.nie 16 16 bn8 697662300
+49.bp4.nie 16 16 bp4 697662300
+49.bp8.nie 16 16 bp8 697662300
+crude-flag.nie 3 2 bn4 2359083796
+hippopotamus.nie 36 28 bn4 3183889069
+animated-red-blue.nia 64 48 nia-bn4 4230696731

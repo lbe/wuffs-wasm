@@ -18,6 +18,12 @@ type configReaderDecoder func([]byte) (image.Config, error)
 // formatName returns the canonical name for a decoded image FourCC.
 func formatName(fourCC uint32) (string, error) {
 	switch fourCC {
+	case FormatETC2:
+		return "etc2", nil
+	case FormatHNSM:
+		return "hnsm", nil
+	case FormatNIE:
+		return "nie", nil
 	case FormatPNG:
 		return "png", nil
 	case FormatWEBP:
@@ -34,6 +40,8 @@ func formatName(fourCC uint32) (string, error) {
 		return "qoi", nil
 	case FormatTGA:
 		return "tga", nil
+	case FormatTH:
+		return "th", nil
 	case FormatWBMP:
 		return "wbmp", nil
 	default:
@@ -80,8 +88,9 @@ func decodeConfigReaderWithDecoder(r io.Reader, decode configReaderDecoder) (ima
 
 // DecodeReader reads r to EOF and decodes the buffered bytes into a newly
 // allocated *image.RGBA. The returned format is the canonical name for the
-// decoded format: png, webp, bmp, gif, jpeg, npbm, qoi, tga, or wbmp. It
-// does not register formats with the standard library image package.
+// decoded format: png, webp, bmp, gif, jpeg, npbm, qoi, tga, wbmp, etc2,
+// hnsm, nie, or th. It does not register formats with the standard library
+// image package.
 func DecodeReader(r io.Reader) (image.Image, string, error) {
 	return decodeReaderWithDecoder(r, Decode)
 }

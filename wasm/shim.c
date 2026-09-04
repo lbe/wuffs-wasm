@@ -44,11 +44,6 @@ enum {
 
 static uint8_t* mem_ptr(uint32_t off) { return (uint8_t*)(uintptr_t)off; }
 
-static uint32_t read_u32le(const uint8_t* p) {
-  return ((uint32_t)p[0]) | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
-         ((uint32_t)p[3] << 24);
-}
-
 // TGA has no reliable magic bytes, so the fallback is a conservative parse of
 // the complete 18-byte header, applied only after all signature-bearing
 // formats have been checked. Only the supported subset is recognized here
@@ -191,6 +186,35 @@ static int sniff_wbmp(const uint8_t* src, uint32_t len) {
   return 1;
 }
 
+// HNSM (Handsum) recognition parses the conservative three-byte structural
+// header, mirroring do_decode_image_config in decode_handsum.wuffs: the top
+// 15 bits of the 24-bit big-endian value must equal 0x7F6B, color class 1
+// and the reserved geometry code 0x1F are rejected, and every accepted code
+// resolves to one dimension of 16 and the other from 1 through 16.
+static int sniff_hnsm(const uint8_t* src, uint32_t len) {
+  if (len < 3) {
+    return 0;
+  }
+
+  uint32_t c32 = ((uint32_t)src[0] << 16) | ((uint32_t)src[1] << 8) |
+                 (uint32_t)src[2];
+  if ((c32 >> 9) != 0x7F6B) {
+    return 0;
+  }
+
+  // Color class 1 is reserved; bits 6-5 (quality) are always 0..3.
+  if (((c32 >> 7) & 3) == 1) {
+    return 0;
+  }
+
+  // Geometry code 0x1F is reserved for future expansion.
+  if ((c32 & 0x1F) == 0x1F) {
+    return 0;
+  }
+
+  return 1;
+}
+
 static uint32_t sniff_fourcc(const uint8_t* src, uint32_t len) {
   if (len >= 2 && src[0] == 'B' && src[1] == 'M') {
     return WUFFS_BASE__FOURCC__BMP;
@@ -216,7 +240,8 @@ static uint32_t sniff_fourcc(const uint8_t* src, uint32_t len) {
       src[3] == 'f') {
     return WUFFS_BASE__FOURCC__QOI;
   }
-  if (len >= 4 && read_u32le(src) == 0x6E696541) {  // "nïA" little-endian
+  if (len >= 4 && src[0] == 0x6E && src[1] == 0xC3 && src[2] == 0xAF &&
+      (src[3] == 0x45 || src[3] == 0x41)) {  // "nïE" still or "nïA" container
     return WUFFS_BASE__FOURCC__NIE;
   }
   if (len >= 4 && src[0] == 'P' &&
@@ -228,16 +253,22 @@ static uint32_t sniff_fourcc(const uint8_t* src, uint32_t len) {
   if (len >= 2 && src[0] == 'P' && src[1] == '6') {
     return WUFFS_BASE__FOURCC__NPBM;
   }
-  if (len >= 4 && src[0] == 0x13 && src[1] == 0xAB && src[2] == 0xA1 &&
-      src[3] == 0x5C) {
+  // ETC2 (PKM) has a literal four-byte magic, "PKM ": the complete header
+  // (version, format fields, and dimensions) and the pixel payload are
+  // validated by the Wuffs etc2 decoder, not by this sniff.
+  if (len >= 4 && src[0] == 'P' && src[1] == 'K' && src[2] == 'M' &&
+      src[3] == ' ') {
     return WUFFS_BASE__FOURCC__ETC2;
   }
-  if (len >= 4 && src[0] == 'H' && src[1] == 'N' && src[2] == 'S' &&
-      src[3] == 'M') {
-    return WUFFS_BASE__FOURCC__HNSM;
-  }
-  if (len >= 5 && src[0] == 0xFF && src[1] == 0xFF && src[2] == 0xFF &&
-      src[3] == 0xFF && src[4] == 0xFF) {
+  // ThumbHash (cooked) has a literal three-byte magic, "\xC3\xBE\xFE":
+  // "\xC3\xBE" is the UTF-8 encoding of 'þ' (U+00FE LATIN SMALL LETTER
+  // THORN) and "\xFE" is the ISO-8859-1 encoding of 'þ'. Wuffs'
+  // decode_thumbhash.wuffs requires this prefix unless
+  // QUIRK_JUST_RAW_THUMBHASH is enabled; the wasm guest leaves that quirk
+  // disabled, so only cooked files beginning {0xC3, 0xBE, 0xFE} are
+  // ThumbHash. The payload header and coefficients are validated by the
+  // Wuffs thumbhash decoder, not by this sniff.
+  if (len >= 3 && src[0] == 0xC3 && src[1] == 0xBE && src[2] == 0xFE) {
     return WUFFS_BASE__FOURCC__TH;
   }
   if (sniff_tga(src, len)) {
@@ -245,6 +276,21 @@ static uint32_t sniff_fourcc(const uint8_t* src, uint32_t len) {
   }
   if (sniff_wbmp(src, len)) {
     return WUFFS_BASE__FOURCC__WBMP;
+  }
+  // Handsum (HNSM) has no literal magic bytes: the format is a three-byte
+  // structural header followed by an encoded coefficient payload. Because
+  // the header itself is the signature, it is checked only after all
+  // literal-signature formats and the conservative TGA and WBMP fallbacks
+  // have been given a chance. The 24-bit big-endian header's top 15 bits
+  // must equal 0x7F6B; of the remaining 9 bits, color (bits 8-7) must be
+  // 0, 2, or 3 (1 is reserved), quality (bits 6-5) is always 0..3, and
+  // geometry (bits 4-0) must not be the reserved code 0x1F: bit 4 clear
+  // decodes to 16 x (g & 15 + 1) and bit 4 set to (g & 15 + 1) x 16, so
+  // every accepted code resolves to one dimension of 16 and the other from
+  // 1 through 16. The encoded coefficient payload length and its values
+  // are validated by the Wuffs handsum decoder, not by this sniff.
+  if (sniff_hnsm(src, len)) {
+    return WUFFS_BASE__FOURCC__HNSM;
   }
   return 0;
 }

@@ -47,8 +47,10 @@ const tgaFourCC = uint32(0x54474120)
 //     attribute rejections over every otherwise-valid baseline class) remain
 //     ErrUnknownFormat.
 //   - The exact higher-priority signature-bearing fixtures (PNG, WebP, BMP,
-//     GIF, JPEG, QOI, PGM, PPM) still probe with their own FourCC, and the
-//     ETC2, HNSM, NIE, and TH signature-marker sentinels retain ErrDecode.
+//     GIF, JPEG, QOI, PGM, PPM) still probe with their own FourCC. The
+//     retired ETC2 placeholder marker {0x13,0xAB,0xA1,0x5C} and the retired
+//     TH placeholder marker {0xFF,0xFF,0xFF,0xFF,0xFF} now return
+//     ErrUnknownFormat.
 //
 // It fails against the current guest because sniff_fourcc does not recognize
 // these valid TGA headers.
@@ -462,28 +464,45 @@ func TestIntegrationTGADecodeCharacterization(t *testing.T) {
 		}
 	})
 
-	t.Run("ETC2 HNSM NIE and TH sentinels retain ErrDecode", func(t *testing.T) {
-		sentinels := []struct {
-			name string
-			src  []byte
-		}{
-			{"ETC2 signature", []byte{0x13, 0xAB, 0xA1, 0x5C}},
-			{"HNSM signature", []byte{'H', 'N', 'S', 'M'}},
-			{"NIE little-endian FourCC", []byte{0x41, 0x65, 0x69, 0x6E}},
-			{"TH signature", []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF}},
-		}
+	t.Run("retired ETC2 placeholder marker returns ErrUnknownFormat", func(t *testing.T) {
+		// FORMAT-03: the former ETC2 marker {0x13,0xAB,0xA1,0x5C} was only a
+		// placeholder recognizer, not a real signature. Now that the literal
+		// "PKM " magic owns ETC2, the retired marker must stay
+		// ErrUnknownFormat: never ErrDecode and never misclassified as TGA.
 		d := wuffs.New()
 		if err := wuffs.RequiredReserve(d, 160*120*4, 16); err != nil {
 			t.Fatalf("RequiredReserve: %v", err)
 		}
-		for _, sc := range sentinels {
-			meta, err := d.Probe(sc.src)
-			if !errors.Is(err, wuffs.ErrDecode) {
-				t.Errorf("Probe(%s) error = %v, want ErrDecode (not FormatTGA, not ErrUnknownFormat)", sc.name, err)
-			}
-			if meta != nil {
-				t.Errorf("Probe(%s) returned non-nil Meta %+v, want nil", sc.name, meta)
-			}
+		meta, err := d.Probe([]byte{0x13, 0xAB, 0xA1, 0x5C})
+		if !errors.Is(err, wuffs.ErrUnknownFormat) {
+			t.Errorf("Probe(retired ETC2 placeholder) error = %v, want ErrUnknownFormat", err)
+		}
+		if errors.Is(err, wuffs.ErrDecode) {
+			t.Errorf("Probe(retired ETC2 placeholder) error = %v, must not be ErrDecode", err)
+		}
+		if meta != nil {
+			t.Errorf("Probe(retired ETC2 placeholder) returned non-nil Meta %+v, want nil (never FormatTGA)", meta)
+		}
+	})
+
+	t.Run("retired TH placeholder marker returns ErrUnknownFormat", func(t *testing.T) {
+		// FORMAT-03: the former TH marker {0xFF,0xFF,0xFF,0xFF,0xFF} was only
+		// a placeholder recognizer, not a real signature. Now that the literal
+		// "\xC3\xBE\xFE" magic owns cooked ThumbHash, the retired marker must
+		// stay ErrUnknownFormat: never ErrDecode and never misclassified as TGA.
+		d := wuffs.New()
+		if err := wuffs.RequiredReserve(d, 160*120*4, 16); err != nil {
+			t.Fatalf("RequiredReserve: %v", err)
+		}
+		meta, err := d.Probe([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+		if !errors.Is(err, wuffs.ErrUnknownFormat) {
+			t.Errorf("Probe(retired TH placeholder) error = %v, want ErrUnknownFormat", err)
+		}
+		if errors.Is(err, wuffs.ErrDecode) {
+			t.Errorf("Probe(retired TH placeholder) error = %v, must not be ErrDecode", err)
+		}
+		if meta != nil {
+			t.Errorf("Probe(retired TH placeholder) returned non-nil Meta %+v, want nil (never FormatTGA)", meta)
 		}
 	})
 }
@@ -596,18 +615,6 @@ func assertTGADecodeRGBA(t *testing.T, d *wuffs.Decoder, name string, dst *image
 		t.Fatal("DecodeRGBA changed the caller-owned destination layout")
 	}
 	return decMeta
-}
-
-// expectUnknownProbe probes src and asserts ErrUnknownFormat with a nil Meta.
-func expectUnknownProbe(t *testing.T, d *wuffs.Decoder, name string, src []byte) {
-	t.Helper()
-	meta, err := d.Probe(src)
-	if !errors.Is(err, wuffs.ErrUnknownFormat) {
-		t.Errorf("Probe(%s) error = %v, want ErrUnknownFormat", name, err)
-	}
-	if meta != nil {
-		t.Errorf("Probe(%s) returned non-nil Meta %+v, want nil", name, meta)
-	}
 }
 
 // tgaHeader builds an 18-byte TGA header.

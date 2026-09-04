@@ -1,0 +1,56 @@
+# FORMAT-03 Handsum (HNSM) golden manifest.
+#
+# Each line selects one vendored upstream handsum fixture and its canonical
+# decode evidence. Fixtures come from the upstream Wuffs repository
+# (https://github.com/google/wuffs, local checkout /home/whgi/src2/wuffs at
+# HEAD c4df79d8), test/data/*.handsum, added in commit
+# 979a9d898ca2afcf3d76bb38040bb65b8ef4921a "lib/handsum: renumber quality from
+# 0..=3 to 1..=4". The wasm guest embeds wuffs-v0.4.c from
+# /home/whgi/src2/wuffs-mirror-release-c (synced 2026-07-11 from upstream
+# revision b22c03837fd4d0ef4d92b37cbff3d727d20d38c6, the exact release the
+# shim compiles).
+#
+# HNSM is a three-byte structural header followed by an encoded coefficient
+# payload. The 24-bit big-endian header value must have its top 15 bits equal
+# to 0x7F6B. The remaining 9 bits split into color (bits 8-7: 0=grayscale,
+# 1=rejected, 2=RGB, 3=RGBA), quality (bits 6-5: 0=worst .. 3=best), and
+# geometry (bits 4-0: 0x1F reserved; bit 4 clear -> 16x(g+1), bit 4 set ->
+# (g+1)x16). The upstream fixture suffixes name the lib/handsum encoder's
+# renumbered quality 1..=4, mapping to the decoder's bit value N-1 recorded
+# in the quality column.
+#
+# The canonical decode evidence was produced by an independent C oracle
+# program (an hnsm_oracle.c sibling of the th_oracle.c used for the previous
+# FORMAT-03 cycle) against the upstream decoder using the guest's
+# decode parameters from wasm/shim.c: pixel format BGRA_PREMUL, blend SRC,
+# workbuf = workbuf_len().max_incl with the 64 KiB fallback. The CRC-32
+# (IEEE) is over the width*height*4 straight (non-premultiplied) RGBA bytes
+# the Go host writes into the caller's image.RGBA Pix, i.e. the raw guest
+# bytes with B and R swapped and each channel unpremultiplied via (c*255)/a,
+# matching convertBGRAToStraight. None of these values were taken from this
+# package's own decoder.
+#
+# The fixture set spans all three accepted color classes (grayscale c1, RGB
+# c3, RGBA c4), all four qualities (q1..q4 -> bits 0..3), and all three
+# geometries: landscape bricks (the 160x120 sources decode to 16x12),
+# portrait mona-lisa (the 21x32 source decodes to 11x16), and square 49
+# (16x16). bricks-gray.c3q4 and bricks-gray.c1q4 share a pixel CRC because
+# rendering a gray source in RGB space at the same quality yields identical
+# straight RGBA pixels.
+#
+# Columns: file encoded_len width height color quality straight_rgba_crc32
+bricks-gray.c1q1.handsum 33 16 12 0 0 2701182688
+bricks-gray.c1q2.handsum 51 16 12 0 1 2530581615
+bricks-gray.c1q3.handsum 83 16 12 0 2 2083664684
+bricks-gray.c1q4.handsum 99 16 12 0 3 1455313668
+bricks-color.c3q1.handsum 48 16 12 2 0 4013192439
+bricks-color.c3q2.handsum 75 16 12 2 1 2359494246
+bricks-color.c3q3.handsum 123 16 12 2 2 2379294073
+bricks-color.c3q4.handsum 147 16 12 2 3 2907993385
+bricks-gray.c3q4.handsum 147 16 12 2 3 1455313668
+49.c3q2.handsum 75 16 16 2 1 2870252445
+49.c3q4.handsum 147 16 16 2 3 2695586047
+49.c4q2.handsum 99 16 16 3 1 3052786633
+49.c4q4.handsum 171 16 16 3 3 2810953312
+mona-lisa.21x32.c3q1.handsum 48 11 16 2 0 504361191
+mona-lisa.21x32.c3q4.handsum 147 11 16 2 3 3717757701

@@ -135,12 +135,16 @@ Image format FourCCs (`Meta.Format`). Values are `WUFFS_BASE__FOURCC__*`.
 ```go
 const (
 	FormatBMP   uint32 = 0x424D5020 // "BMP "
+	FormatETC2  uint32 = 0x45544332 // "ETC2"
 	FormatGIF   uint32 = 0x47494620 // "GIF "
+	FormatHNSM  uint32 = 0x484E534D // "HNSM"
 	FormatJPEG  uint32 = 0x4A504547 // "JPEG"
+	FormatNIE   uint32 = 0x4E494520 // "NIE "
 	FormatNPBM  uint32 = 0x4E50424D // "NPBM"
 	FormatPNG   uint32 = 0x504E4720 // "PNG "
 	FormatQOI   uint32 = 0x514F4920 // "QOI "
 	FormatTGA   uint32 = 0x54474120 // "TGA "
+	FormatTH    uint32 = 0x54482020 // "TH  "
 	FormatWBMP  uint32 = 0x57424D50 // "WBMP"
 	FormatWEBP  uint32 = 0x57454250 // "WEBP"
 )
@@ -349,11 +353,12 @@ func DecodeReader(r io.Reader) (image.Image, string, error)
 `DecodeReader` reads `r` fully to EOF into a `[]byte`, then delegates to the
 allocating `Decode` helper. It returns a newly allocated `*image.RGBA` as an
 `image.Image`, together with the canonical format name (`"png"`, `"webp"`,
-`"bmp"`, `"gif"`, `"jpeg"`, `"npbm"`, `"qoi"`, `"tga"`, or `"wbmp"`) for
-the verified formats. Reader errors and decode errors retain their exact
-identity; failures return a nil image and an empty format. Full buffering and
-image allocation are intentional. The adapter does not register formats with
-the standard library's global image decoder registry.
+`"bmp"`, `"gif"`, `"jpeg"`, `"npbm"`, `"qoi"`, `"tga"`, `"wbmp"`, `"etc2"`,
+`"hnsm"`, `"nie"`, or `"th"`) for the verified formats. Reader errors and
+decode errors retain their exact identity; failures return a nil image and an
+empty format. Full buffering and image allocation are intentional. The adapter
+does not register formats with the standard library's global image decoder
+registry.
 
 ```go
 func DecodeConfigReader(r io.Reader) (image.Config, error)
@@ -376,8 +381,16 @@ func RegisterFormats()
 
 ### Verified format subsets
 
-The verified nine-format set is PNG, WebP, BMP, GIF, JPEG, NPBM, QOI, TGA, and
-WBMP. Three formats are verified on documented subsets:
+The verified thirteen-format set is PNG, WebP, BMP, GIF, JPEG, NPBM, QOI, TGA,
+WBMP, ETC2, HNSM, NIE, and TH. Four formats are verified on documented scope:
+
+- **HNSM** is Handsum; **NIE** is limited to still images and frame zero.
+- **TH** supports only the cooked C3 BE FE form while raw ThumbHash is unsupported.
+- **ETC2** covers the PKM fixtures in `testdata/` (ETC1, ETC1S, ETC2 RGB,
+  non-multiple-of-four geometry, one-bit alpha, and full non-premultiplied
+  alpha).
+
+Three formats are verified on documented subsets:
 
 - **NPBM** supports binary PGM P5 and PPM P6 with Maxval exactly 255 or 65535;
   all other maxima are unsupported.

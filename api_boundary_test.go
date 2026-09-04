@@ -116,7 +116,7 @@ func TestUnitPublicAPIBoundary(t *testing.T) {
 	}
 
 	// Required inventory.
-	wantConsts := []string{"FormatPNG", "FormatWEBP", "FormatBMP", "FormatGIF", "FormatJPEG", "FormatNPBM", "FormatQOI", "FormatTGA", "FormatWBMP"}
+	wantConsts := []string{"FormatPNG", "FormatWEBP", "FormatBMP", "FormatETC2", "FormatGIF", "FormatHNSM", "FormatJPEG", "FormatNIE", "FormatNPBM", "FormatQOI", "FormatTH", "FormatTGA", "FormatWBMP"}
 	wantVars := []string{"ErrBadImage", "ErrDecode", "ErrDstTooSmall", "ErrSrcTooLarge", "ErrUnknownFormat"}
 	wantTypes := []string{"Decoder", "DstTooSmallError", "Meta"}
 	wantFuncs := []string{"New", "Probe", "Decode", "DecodeConfig", "DecodeGray", "DecodeNRGBA", "DecodeReader", "DecodeConfigReader"}
