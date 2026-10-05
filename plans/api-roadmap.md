@@ -112,9 +112,9 @@ guest memory internally.
 | `CONV-01`   | Package-level allocating decode helpers           | Runbook   | `plans/conv-01-adherence-remediation.md`          | `STILL-01`          | No            | `Complete`    |
 | `ADAPT-01`  | Reader and config adapters                        | TDD       | `.pi/tdd-plans/adapt-01-reader-adapters.yaml`     | `CONV-01`           | No            | `Complete`    |
 | `FORMAT-01` | Verify common-image batch: BMP, GIF, JPEG         | TDD       | `.pi/tdd-plans/format-01-common-images.yaml`      | `CORE-01`           | No            | `Complete`    |
-| `FORMAT-02` | Verify portable-image batch: NPBM, QOI, TGA, WBMP | TDD       | `.pi/tdd-plans/format-02-portable-images.yaml`    | `CORE-01`           | Yes           | `Review`      |
-| `FORMAT-03` | Verify remaining-image batch: ETC2, HNSM, NIE, TH | TDD       | `.pi/tdd-plans/format-03-remaining-images.yaml`   | `CORE-01`           | Yes           | `Review`      |
-| `REG-01`    | Register verified formats                         | TDD       | To be created                                     | `ADAPT-01`, formats | No            | `Not planned` |
+| `FORMAT-02` | Verify portable-image batch: NPBM, QOI, TGA, WBMP | TDD       | `.pi/tdd-plans/format-02-portable-images.yaml`    | `CORE-01`           | Yes           | `Complete`    |
+| `FORMAT-03` | Verify remaining-image batch: ETC2, HNSM, NIE, TH | TDD       | `.pi/tdd-plans/format-03-remaining-images.yaml`   | `CORE-01`           | Yes           | `Complete`    |
+| `REG-01`    | Register verified formats                         | TDD       | `.pi/tdd-plans/reg-01-register-formats.yaml`      | `ADAPT-01`, formats | No            | `Complete`    |
 | `ANIM-01`   | Animation APIs                                    | TDD       | To be created                                     | `CORE-02`           | Yes           | `Not planned` |
 | `META-01`   | Metadata APIs                                     | TDD       | To be created                                     | `CORE-02`           | Yes           | `Not planned` |
 

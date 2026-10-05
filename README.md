@@ -239,6 +239,23 @@ It returns a zero `image.Config` on reader or decode failure, preserving the
 underlying error, and does not register formats with the standard library's
 global image decoder registry.
 
+### Standard-library registration
+
+`RegisterFormats` is explicit opt-in registration of exactly the thirteen
+verified formats with the standard library's global image decoder registry,
+so image.Decode and image.DecodeConfig recognize them. It registers each
+format only once via sync.Once; it is safe for concurrent use. The global
+image registry is first-match-wins, so earlier registrations remain
+authoritative. The TGA entries use exact-header 18-byte magics and the WBMP
+entries use literal-prefix magics; both keep their intentional
+prefix-recognition false-positive boundaries.
+
+```go
+wuffs.RegisterFormats()
+img, format, err := image.Decode(f)
+cfg, err := image.DecodeConfig(f)
+```
+
 ## API
 
 | Symbol                                                                                                                                                                               | Description                                                                                                                                                                                                                             |

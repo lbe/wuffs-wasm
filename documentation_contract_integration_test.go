@@ -20,7 +20,8 @@ import (
 // subset, and the WBMP Type 0 canonical dimension subset described below in
 // README.md and API.md; HNSM identified as Handsum; NIE limited to still
 // images and frame zero; TH supporting only the cooked form while raw
-// ThumbHash is unsupported; FORMAT-03 in Review; and REG-01 as future work.
+// ThumbHash is unsupported; FORMAT-03 Complete; and REG-01 Complete with
+// its plan file recorded.
 func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -213,9 +214,12 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 	}
 	checkExactSet("API.md constants block", "declare", declared, acceptedIDs)
 
-	// API.md: RegisterFormats remains future REG-01 work, not part of the API.
-	if got := requireAll(api, []string{"RegisterFormats", "future", "not currently implemented"}); len(got) > 0 {
-		t.Errorf("API.md must keep RegisterFormats as future REG-01 work; missing %v", got)
+	// API.md: RegisterFormats is implemented REG-01 work.
+	if !strings.Contains(api, "RegisterFormats") {
+		t.Errorf("API.md must document RegisterFormats as implemented REG-01 work")
+	}
+	if strings.Contains(strings.ToLower(api), "not currently implemented") {
+		t.Errorf("API.md must accept RegisterFormats as implemented; found stale \"not currently implemented\" claim")
 	}
 
 	// README.md and API.md must state the NPBM, TGA, and WBMP support
@@ -318,9 +322,9 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 	}
 
 	// plans/api-roadmap.md: a distinct FORMAT-03 entry points to this plan
-	// with dependency CORE-01, guest changes Yes, and status Review; the
+	// with dependency CORE-01, guest changes Yes, and status Complete; the
 	// generic FORMAT-* entry is gone (no deferred formats remain); REG-01
-	// (RegisterFormats) remains Not planned.
+	// (RegisterFormats) is Complete and points to its plan file.
 	regStart := strings.Index(roadmap, "## Work registry")
 	if regStart < 0 {
 		t.Fatal("api-roadmap.md does not contain a Work registry section")
@@ -342,7 +346,7 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 	if line := findLine(regBody, "FORMAT-03"); line == "" {
 		t.Error("api-roadmap.md registry must add a distinct FORMAT-03 remaining-images entry")
 	} else {
-		for _, want := range []string{"format-03-remaining-images.yaml", "CORE-01", "Yes", "Review", "ETC2", "HNSM", "NIE", "TH"} {
+		for _, want := range []string{"format-03-remaining-images.yaml", "CORE-01", "Yes", "Complete", "ETC2", "HNSM", "NIE", "TH"} {
 			if !strings.Contains(line, want) {
 				t.Errorf("FORMAT-03 entry must mention %s; entry is: %s", want, line)
 			}
@@ -355,7 +359,11 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 
 	if line := findLine(regBody, "REG-01"); line == "" {
 		t.Error("api-roadmap.md registry must keep REG-01")
-	} else if !strings.Contains(line, "Not planned") {
-		t.Errorf("REG-01 (RegisterFormats) must remain Not planned; entry is: %s", line)
+	} else {
+		for _, want := range []string{".pi/tdd-plans/reg-01-register-formats.yaml", "Complete"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("REG-01 entry must mention %s; entry is: %s", want, line)
+			}
+		}
 	}
 }
