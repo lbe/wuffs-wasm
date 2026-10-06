@@ -366,4 +366,44 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 			}
 		}
 	}
+
+	// ANIM-01: animation documentation inventory. README.md and API.md must
+	// advertise FrameCount, LoopCount, and DecodeFrame; NIE scope moves from
+	// frame-zero-only to nïA multi-frame verified; GIF animation must
+	// document DecodeFrame instead of standing as "first frame only"; PNG
+	// remains first-frame-only; WebP remains still-only with no animation;
+	// ANIM-01 is In progress or Review.
+	animationAPIs := []string{"FrameCount", "LoopCount", "DecodeFrame"}
+	for file, text := range map[string]string{"README.md": readme, "API.md": api} {
+		if got := requireAll(text, animationAPIs); len(got) > 0 {
+			t.Errorf("%s must document the animation APIs (%v)", file, got)
+		}
+		if !sameLine(text, []string{"nie", "still", "frame zero"}) {
+			t.Errorf("%s must limit NIE stills to still images and frame zero on one line", file)
+		}
+		if !sameLine(text, []string{"nïa", "multi-frame"}) {
+			t.Errorf("%s must verify NIE nïA multi-frame animation on one line", file)
+		}
+		if !sameLine(text, []string{"gif", "DecodeFrame"}) {
+			t.Errorf("%s must document GIF animation via DecodeFrame on one line", file)
+		}
+		for _, line := range strings.Split(text, "\n") {
+			lower := strings.ToLower(line)
+			if strings.Contains(lower, "gif") && strings.Contains(lower, "first frame only") {
+				t.Errorf("%s must not list GIF animation as first frame only without DecodeFrame: %q", file, line)
+			}
+		}
+		if !sameLine(text, []string{"png", "first-frame"}) {
+			t.Errorf("%s must keep PNG as first-frame-only on one line", file)
+		}
+		if !sameLine(text, []string{"webp", "no animation"}) {
+			t.Errorf("%s must keep WebP as still-only with no animation on one line", file)
+		}
+	}
+
+	if line := findLine(regBody, "ANIM-01"); line == "" {
+		t.Error("api-roadmap.md registry must keep ANIM-01")
+	} else if !strings.Contains(line, "In progress") && !strings.Contains(line, "Review") && !strings.Contains(line, "Complete") {
+		t.Errorf("ANIM-01 entry must be In progress, Review, or Complete; entry is: %s", line)
+	}
 }

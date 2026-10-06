@@ -116,18 +116,20 @@ func TestUnitPublicAPIBoundary(t *testing.T) {
 	}
 
 	// Required inventory.
-	wantConsts := []string{"FormatPNG", "FormatWEBP", "FormatBMP", "FormatETC2", "FormatGIF", "FormatHNSM", "FormatJPEG", "FormatNIE", "FormatNPBM", "FormatQOI", "FormatTH", "FormatTGA", "FormatWBMP"}
+	wantConsts := []string{"FormatPNG", "FormatWEBP", "FormatBMP", "FormatETC2", "FormatGIF", "FormatHNSM", "FormatJPEG", "FormatNIE", "FormatNPBM", "FormatQOI", "FormatTH", "FormatTGA", "FormatWBMP", "DisposalNone", "DisposalRestoreBackground", "DisposalRestorePrevious"}
 	wantVars := []string{"ErrBadImage", "ErrDecode", "ErrDstTooSmall", "ErrSrcTooLarge", "ErrUnknownFormat"}
-	wantTypes := []string{"Decoder", "DstTooSmallError", "Meta"}
+	wantTypes := []string{"Decoder", "DstTooSmallError", "Meta", "Frame", "Disposal"}
 	wantFuncs := []string{"New", "Probe", "Decode", "DecodeConfig", "DecodeGray", "DecodeNRGBA", "DecodeReader", "DecodeConfigReader", "RegisterFormats"}
 	wantMethods := map[string][]string{
-		"Decoder":          {"DecodeGray", "DecodeNRGBA", "DecodeRGBA", "Probe", "Reserve", "Version", "VersionNum"},
+		"Decoder":          {"DecodeFrame", "DecodeGray", "DecodeNRGBA", "DecodeRGBA", "FrameCount", "LoopCount", "Probe", "Reserve", "Version", "VersionNum"},
 		"DstTooSmallError": {"Error", "Is"},
 	}
 	wantFields := map[string][]string{
 		"Meta":             {"Err", "Width", "Height", "Stride", "BytesWritten", "Format"},
 		"DstTooSmallError": {"MinBytes", "Width", "Height", "Stride"},
 		"Decoder":          {}, // none exported
+		"Frame":            {"Index", "Bounds", "Duration", "Disposal", "Opaque", "Overwrite", "Background", "IOPosition"},
+		"Disposal":         {}, // kind uint8, no fields
 	}
 
 	// Report MISSING and UNEXPECTED clearly.

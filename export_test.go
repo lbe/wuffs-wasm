@@ -38,15 +38,18 @@ func CurrentDstSlotLen(d *Decoder) uint32 { return d.currentLayout.dstLen }
 // single equality that a guest call left the wasm backing store, its byte
 // length, and every slot offset and size unchanged.
 type GuestMemoryState struct {
-	MemoryBase unsafe.Pointer // backing pointer of the wasm memory slice
-	MemoryLen  int            // byte length of the wasm memory slice
-	MetaOff    uint32         // currentLayout.metaOff
-	MetaLen    uint32         // currentLayout.metaLen
-	SrcOff     uint32         // currentLayout.srcOff
-	SrcLen     uint32         // currentLayout.srcLen
-	DstOff     uint32         // currentLayout.dstOff
-	DstLen     uint32         // currentLayout.dstLen
-	HostBase   uint32         // currentLayout.hostBase
+	MemoryBase   unsafe.Pointer // backing pointer of the wasm memory slice
+	MemoryLen    int            // byte length of the wasm memory slice
+	CountOutOff  uint32         // currentLayout.countOutOff
+	LoopsOutOff  uint32         // currentLayout.loopsOutOff
+	FrameMetaOff uint32         // currentLayout.frameMetaOff
+	MetaOff      uint32         // currentLayout.metaOff
+	MetaLen      uint32         // currentLayout.metaLen
+	SrcOff       uint32         // currentLayout.srcOff
+	SrcLen       uint32         // currentLayout.srcLen
+	DstOff       uint32         // currentLayout.dstOff
+	DstLen       uint32         // currentLayout.dstLen
+	HostBase     uint32         // currentLayout.hostBase
 }
 
 // CaptureGuestMemoryState snapshots the complete wasm memory slice (backing
@@ -56,14 +59,17 @@ type GuestMemoryState struct {
 func CaptureGuestMemoryState(d *Decoder) GuestMemoryState {
 	memBytes := *d.module.Xmemory().Slice()
 	return GuestMemoryState{
-		MemoryBase: unsafe.Pointer(unsafe.SliceData(memBytes)),
-		MemoryLen:  len(memBytes),
-		MetaOff:    d.currentLayout.metaOff,
-		MetaLen:    d.currentLayout.metaLen,
-		SrcOff:     d.currentLayout.srcOff,
-		SrcLen:     d.currentLayout.srcLen,
-		DstOff:     d.currentLayout.dstOff,
-		DstLen:     d.currentLayout.dstLen,
-		HostBase:   d.currentLayout.hostBase,
+		MemoryBase:   unsafe.Pointer(unsafe.SliceData(memBytes)),
+		MemoryLen:    len(memBytes),
+		CountOutOff:  d.currentLayout.countOutOff,
+		LoopsOutOff:  d.currentLayout.loopsOutOff,
+		FrameMetaOff: d.currentLayout.frameMetaOff,
+		MetaOff:      d.currentLayout.metaOff,
+		MetaLen:      d.currentLayout.metaLen,
+		SrcOff:       d.currentLayout.srcOff,
+		SrcLen:       d.currentLayout.srcLen,
+		DstOff:       d.currentLayout.dstOff,
+		DstLen:       d.currentLayout.dstLen,
+		HostBase:     d.currentLayout.hostBase,
 	}
 }

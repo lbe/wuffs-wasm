@@ -397,7 +397,7 @@ cfg, err := image.DecodeConfig(f)
 The verified thirteen-format set is PNG, WebP, BMP, GIF, JPEG, NPBM, QOI, TGA,
 WBMP, ETC2, HNSM, NIE, and TH. Four formats are verified on documented scope:
 
-- **HNSM** is Handsum; **NIE** is limited to still images and frame zero.
+- **HNSM** is Handsum; **NIE** covers still nïE images (still images, frame zero) plus verified nïA multi-frame animation.
 - **TH** supports only the cooked C3 BE FE form while raw ThumbHash is unsupported.
 - **ETC2** covers the PKM fixtures in `testdata/` (ETC1, ETC1S, ETC2 RGB,
   non-multiple-of-four geometry, one-bit alpha, and full non-premultiplied
@@ -418,6 +418,16 @@ Three formats are verified on documented subsets:
   are unsupported.
 - **WBMP** supports Type 0 with canonical shortest-form dimension encodings
   and nonzero dimensions no greater than 0xFFFFFF.
+- **GIF** animation is verified multi-frame via DecodeFrame GIF animation.
+- **PNG** remains first-frame-only still images.
+- **WebP** remains still-only (lossless, no alpha, no animation).
+
+### Animation under verified scope
+
+Multi-frame animation is verified for GIF and NIE nïA multi-frame via
+`FrameCount`, `LoopCount`, and `DecodeFrame`; `DecodeRGBA` decodes frame 0.
+PNG remains first-frame-only still images, and WebP remains still-only
+(lossless, no alpha, no animation).
 
 ---
 

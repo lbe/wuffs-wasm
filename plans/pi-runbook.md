@@ -185,15 +185,15 @@ Stop on the **first** occurrence. The message must include task id, what failed
 or conflicts, exact command output or plan line, and that execution is stopped
 awaiting user direction.
 
-| Trigger | Examples |
-| -------- | -------- |
-| Plan step impossible or false | Assertion contradicts library behavior or documented API |
-| Verify or RED fails unexpectedly | Fails after a GREEN step when the plan said it should pass |
-| Plan ambiguity | Two interpretations; whitelist does not list a file the compiler requires |
-| Missing prerequisite | Required tool or command missing |
-| Scope escape | Change needed outside the task whitelist |
-| Production vs test fix unclear | Failing test might need prod fix, test fix, or plan fix — default **STOP** |
-| Audit or review role | Audit-plan and reviewers never implement product code or `git commit` |
+| Trigger                          | Examples                                                                   |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| Plan step impossible or false    | Assertion contradicts library behavior or documented API                   |
+| Verify or RED fails unexpectedly | Fails after a GREEN step when the plan said it should pass                 |
+| Plan ambiguity                   | Two interpretations; whitelist does not list a file the compiler requires  |
+| Missing prerequisite             | Required tool or command missing                                           |
+| Scope escape                     | Change needed outside the task whitelist                                   |
+| Production vs test fix unclear   | Failing test might need prod fix, test fix, or plan fix — default **STOP** |
+| Audit or review role             | Audit-plan and reviewers never implement product code or `git commit`      |
 
 Do not weaken tests, edit the plan, or add helpers to unblock unless the user
 explicitly authorizes that exact change in a follow-up message.
@@ -290,13 +290,13 @@ runbook. Plan-specific triggers live **only** in the table in this section.
 
 Executors **must not** edit this plan file. On any trigger below (or any global rule): **STOP**, message the user (task id, evidence), **no commit**, **no next task** until written user direction.
 
-| # | Trigger | Executor action |
-|---|---------|-----------------|
-| 1 | Prerequisite check fails | STOP — notify user |
-| 2 | Plan step contradicts runtime, libs, or tests | STOP — notify user (do not change plan or assertions) |
-| 3 | Verify fails for reason not explained by current RED/GREEN step | STOP — notify user |
-| 4 | Required file not in task whitelist | STOP — notify user |
-| 5 | <plan-specific gates> | STOP — notify user |
+| # | Trigger                                                         | Executor action                                       |
+| - | --------------------------------------------------------------- | ----------------------------------------------------- |
+| 1 | Prerequisite check fails                                        | STOP — notify user                                    |
+| 2 | Plan step contradicts runtime, libs, or tests                   | STOP — notify user (do not change plan or assertions) |
+| 3 | Verify fails for reason not explained by current RED/GREEN step | STOP — notify user                                    |
+| 4 | Required file not in task whitelist                             | STOP — notify user                                    |
+| 5 | <plan-specific gates>                                           | STOP — notify user                                    |
 ```
 
 ### No optionality in plans (mandatory)

@@ -545,6 +545,350 @@ __attribute__((export_name("wuffs_probe_image"))) int32_t wuffs_wasm_probe_image
   return probe_image(src_off, src_len, meta_off);
 }
 
+// wuffs_frame_count walks frame configs only (no pixel decompress) and
+// writes the number of frames to *count_out (int32). It returns
+// WUFFS_WASM_OK on success or a negative WUFFS_WASM_ERR_* code.
+static int32_t frame_count(uint32_t src_off, uint32_t src_len,
+                           uint32_t count_out_off) {
+  if (src_len == 0 || count_out_off == 0) {
+    return WUFFS_WASM_ERR_BAD_ARG;
+  }
+
+  // Rewind bump allocator for this call.
+  bump_rewind();
+
+  uint8_t* src_ptr = mem_ptr(src_off);
+  int32_t* count_out = (int32_t*)mem_ptr(count_out_off);
+  *count_out = 0;
+
+  uint32_t fourcc = sniff_fourcc(src_ptr, src_len);
+  const wuffs_wasm_decoder_slot* slot = find_decoder(fourcc);
+  if (slot == NULL) {
+    return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
+  }
+
+  // Guard: reject decoders whose object exceeds bump limit.
+  if (slot->obj_size > BUMP_LIMIT) {
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  // Allocate decoder from bump region.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  memset(dec, 0, slot->obj_size);
+
+  wuffs_base__status status =
+      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+  if (status.repr != NULL) {
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  wuffs_base__image_decoder* decoder = slot->upcast(dec);
+  if (fourcc == WUFFS_BASE__FOURCC__PNG) {
+    wuffs_base__image_decoder__set_quirk(
+        decoder, WUFFS_BASE__QUIRK_IGNORE_CHECKSUM, 1);
+  }
+
+  wuffs_base__io_buffer src = {
+      .data = {.ptr = src_ptr, .len = src_len},
+      .meta = {.wi = src_len, .ri = 0, .pos = 0, .closed = 1},
+  };
+
+  wuffs_base__image_config ic = {0};
+  status = wuffs_base__image_decoder__decode_image_config(decoder, &ic, &src);
+  if (status.repr != NULL) {
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  int32_t count = 0;
+  for (;;) {
+    wuffs_base__frame_config fc = {0};
+    status = wuffs_base__image_decoder__decode_frame_config(decoder, &fc, &src);
+    if (status.repr == wuffs_base__note__end_of_data) {
+      break;
+    }
+    if (status.repr != NULL) {
+      return WUFFS_WASM_ERR_DECODE;
+    }
+    count++;
+  }
+
+  *count_out = count;
+  return WUFFS_WASM_OK;
+}
+
+__attribute__((export_name("wuffs_frame_count"))) int32_t wuffs_wasm_frame_count(
+    uint32_t src_off, uint32_t src_len, uint32_t count_out_off) {
+  return frame_count(src_off, src_len, count_out_off);
+}
+
+// Writes uint32 loop count to *loops_out_off using num_animation_loops .
+static int32_t animation_loops(uint32_t src_off, uint32_t src_len,
+                               uint32_t loops_out_off) {
+  if (src_len == 0 || loops_out_off == 0) {
+    return WUFFS_WASM_ERR_BAD_ARG;
+  }
+
+  // Rewind bump allocator for this call.
+  bump_rewind();
+
+  uint8_t* src_ptr = mem_ptr(src_off);
+  uint32_t* loops_out = (uint32_t*)mem_ptr(loops_out_off);
+  *loops_out = 0;
+
+  uint32_t fourcc = sniff_fourcc(src_ptr, src_len);
+  const wuffs_wasm_decoder_slot* slot = find_decoder(fourcc);
+  if (slot == NULL) {
+    return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
+  }
+
+  // Guard: reject decoders whose object exceeds bump limit.
+  if (slot->obj_size > BUMP_LIMIT) {
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  // Allocate decoder from bump region.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  memset(dec, 0, slot->obj_size);
+
+  wuffs_base__status status =
+      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+  if (status.repr != NULL) {
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  wuffs_base__image_decoder* decoder = slot->upcast(dec);
+  if (fourcc == WUFFS_BASE__FOURCC__PNG) {
+    wuffs_base__image_decoder__set_quirk(
+        decoder, WUFFS_BASE__QUIRK_IGNORE_CHECKSUM, 1);
+  }
+
+  wuffs_base__io_buffer src = {
+      .data = {.ptr = src_ptr, .len = src_len},
+      .meta = {.wi = src_len, .ri = 0, .pos = 0, .closed = 1},
+  };
+
+  wuffs_base__image_config ic = {0};
+  status = wuffs_base__image_decoder__decode_image_config(decoder, &ic, &src);
+  if (status.repr != NULL) {
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  *loops_out = wuffs_base__image_decoder__num_animation_loops(decoder);
+  return WUFFS_WASM_OK;
+}
+
+__attribute__((export_name("wuffs_animation_loops"))) int32_t
+wuffs_wasm_animation_loops(uint32_t src_off, uint32_t src_len,
+                           uint32_t loops_out_off) {
+  return animation_loops(src_off, src_len, loops_out_off);
+}
+
+// wuffs_wasm_frame_meta — written by decode_frame export; zeroed before call.
+typedef struct wuffs_wasm_frame_meta {
+  int32_t err;
+  uint32_t index;
+  int32_t bounds_min_x;
+  int32_t bounds_min_y;
+  int32_t bounds_max_x;
+  int32_t bounds_max_y;
+  uint64_t duration_flicks;
+  uint64_t io_position;
+  uint8_t disposal;    // Wuffs animation_disposal 0..2
+  uint8_t overwrite;   // 1 = overwrite_instead_of_blend
+  uint8_t opaque;      // 1 = opaque_within_bounds
+  uint8_t bg_r;
+  uint8_t bg_g;
+  uint8_t bg_b;
+  uint8_t bg_a;
+} wuffs_wasm_frame_meta;  // 48 bytes, 8-byte aligned
+
+// Decodes frame `index` (0-based). decode_meta_off is wuffs_wasm_decode_meta;
+// frame_meta_off is wuffs_wasm_frame_meta. Decodes into full canvas scratch at
+// dst_off with capacity dst_cap (same layout as wuffs_decode_image).
+static int32_t decode_frame(uint32_t src_off, uint32_t src_len,
+                            uint32_t dst_off, uint32_t dst_cap,
+                            uint32_t decode_meta_off, uint32_t frame_meta_off,
+                            int32_t index) {
+  if (src_len == 0 || decode_meta_off == 0 || frame_meta_off == 0 ||
+      index < 0) {
+    wuffs_wasm_decode_meta* dm =
+        decode_meta_off ? (wuffs_wasm_decode_meta*)mem_ptr(decode_meta_off)
+                        : NULL;
+    if (dm) {
+      memset(dm, 0, sizeof(*dm));
+      dm->err = WUFFS_WASM_ERR_DECODE;
+    }
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  // Rewind bump allocator for this call.
+  bump_rewind();
+
+  uint8_t* src_ptr = mem_ptr(src_off);
+  uint8_t* dst_ptr = mem_ptr(dst_off);
+  wuffs_wasm_decode_meta* dec_meta =
+      (wuffs_wasm_decode_meta*)mem_ptr(decode_meta_off);
+  wuffs_wasm_frame_meta* frame_meta =
+      (wuffs_wasm_frame_meta*)mem_ptr(frame_meta_off);
+  memset(dec_meta, 0, sizeof(*dec_meta));
+  memset(frame_meta, 0, sizeof(*frame_meta));
+
+  uint32_t fourcc = sniff_fourcc(src_ptr, src_len);
+  const wuffs_wasm_decoder_slot* slot = find_decoder(fourcc);
+  if (slot == NULL) {
+    dec_meta->err = WUFFS_WASM_ERR_UNKNOWN_FORMAT;
+    frame_meta->err = WUFFS_WASM_ERR_UNKNOWN_FORMAT;
+    return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
+  }
+
+  // Guard: reject decoders whose object exceeds bump limit.
+  if (slot->obj_size > BUMP_LIMIT) {
+    dec_meta->err = WUFFS_WASM_ERR_DECODE;
+    frame_meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  // Allocate decoder from bump region.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  memset(dec, 0, slot->obj_size);
+
+  wuffs_base__status status =
+      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+  if (status.repr != NULL) {
+    dec_meta->err = WUFFS_WASM_ERR_DECODE;
+    frame_meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  wuffs_base__image_decoder* decoder = slot->upcast(dec);
+  if (fourcc == WUFFS_BASE__FOURCC__PNG) {
+    wuffs_base__image_decoder__set_quirk(
+        decoder, WUFFS_BASE__QUIRK_IGNORE_CHECKSUM, 1);
+  }
+
+  wuffs_base__io_buffer src = {
+      .data = {.ptr = src_ptr, .len = src_len},
+      .meta = {.wi = src_len, .ri = 0, .pos = 0, .closed = 1},
+  };
+
+  wuffs_base__image_config ic = {0};
+  status = wuffs_base__image_decoder__decode_image_config(decoder, &ic, &src);
+  if (status.repr != NULL) {
+    dec_meta->err = WUFFS_WASM_ERR_DECODE;
+    frame_meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  wuffs_base__pixel_format pixfmt =
+      wuffs_base__make_pixel_format(WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL);
+  wuffs_base__pixel_config__set(
+      &ic.pixcfg, pixfmt.repr, WUFFS_BASE__PIXEL_SUBSAMPLING__NONE,
+      wuffs_base__pixel_config__width(&ic.pixcfg),
+      wuffs_base__pixel_config__height(&ic.pixcfg));
+
+  uint32_t width = wuffs_base__pixel_config__width(&ic.pixcfg);
+  uint32_t height = wuffs_base__pixel_config__height(&ic.pixcfg);
+  uint64_t need = (uint64_t)width * (uint64_t)height * 4;
+  if (need == 0 || need > dst_cap) {
+    dec_meta->width = width;
+    dec_meta->height = height;
+    dec_meta->stride = width * 4;
+    dec_meta->err = WUFFS_WASM_ERR_DST_TOO_SMALL;
+    frame_meta->err = WUFFS_WASM_ERR_DST_TOO_SMALL;
+    return WUFFS_WASM_ERR_DST_TOO_SMALL;
+  }
+
+  // Allocate workbuf sized by the decoder (not hardcoded).
+  wuffs_base__range_ii_u64 wb_range =
+      wuffs_base__image_decoder__workbuf_len(decoder);
+  if (wb_range.min_incl > wb_range.max_incl) {
+    dec_meta->err = WUFFS_WASM_ERR_DECODE;
+    frame_meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+  uint32_t wb_len = (uint32_t)wb_range.max_incl;
+  if (wb_len == 0) {
+    wb_len = 64 * 1024;  // minimum 64 KiB fallback
+  }
+  uint8_t* workbuf = bump_alloc(wb_len);
+  wuffs_base__slice_u8 work_slice = {
+      .ptr = workbuf,
+      .len = wb_len,
+  };
+
+  wuffs_base__pixel_buffer pb = {0};
+  wuffs_base__slice_u8 pix_slice = {.ptr = dst_ptr, .len = dst_cap};
+  status = wuffs_base__pixel_buffer__set_from_slice(&pb, &ic.pixcfg, pix_slice);
+  if (status.repr != NULL) {
+    dec_meta->err = WUFFS_WASM_ERR_DECODE;
+    frame_meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+  memset(dst_ptr, 0, (size_t)need);
+
+  // Advance to frame index via decode_frame_config (which skips prior
+  // frames' pixel data), then decode only that frame with SRC (replace)
+  // blend so scratch's Bounds region holds the indexed frame's own delta
+  // pixels. No prior-frame compositing, no disposal/background replay.
+  wuffs_base__frame_config fc = {0};
+  for (int32_t i = 0; i <= index; i++) {
+    status = wuffs_base__image_decoder__decode_frame_config(decoder, &fc, &src);
+    if (status.repr != NULL) {
+      // Out-of-range index (end_of_data before reaching index) or corrupt
+      // stream: report WUFFS_WASM_ERR_DECODE on both metas.
+      dec_meta->err = WUFFS_WASM_ERR_DECODE;
+      frame_meta->err = WUFFS_WASM_ERR_DECODE;
+      return WUFFS_WASM_ERR_DECODE;
+    }
+  }
+  status = wuffs_base__image_decoder__decode_frame(
+      decoder, &pb, &src, WUFFS_BASE__PIXEL_BLEND__SRC, work_slice, NULL);
+  if (status.repr != NULL) {
+    dec_meta->err = WUFFS_WASM_ERR_DECODE;
+    frame_meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  wuffs_base__rect_ie_u32 bounds = wuffs_base__frame_config__bounds(&fc);
+  uint32_t bg = wuffs_base__frame_config__background_color(&fc);
+  uint32_t bg_nonpremul =
+      wuffs_base__color_u32_argb_premul__as__color_u32_argb_nonpremul(bg);
+
+  frame_meta->err = WUFFS_WASM_OK;
+  frame_meta->index = (uint32_t)index;
+  frame_meta->bounds_min_x = (int32_t)bounds.min_incl_x;
+  frame_meta->bounds_min_y = (int32_t)bounds.min_incl_y;
+  frame_meta->bounds_max_x = (int32_t)bounds.max_excl_x;
+  frame_meta->bounds_max_y = (int32_t)bounds.max_excl_y;
+  frame_meta->duration_flicks = (uint64_t)wuffs_base__frame_config__duration(&fc);
+  frame_meta->io_position = wuffs_base__frame_config__io_position(&fc);
+  frame_meta->disposal = wuffs_base__frame_config__disposal(&fc);
+  frame_meta->overwrite =
+      wuffs_base__frame_config__overwrite_instead_of_blend(&fc) ? 1 : 0;
+  frame_meta->opaque =
+      wuffs_base__frame_config__opaque_within_bounds(&fc) ? 1 : 0;
+  frame_meta->bg_r = (uint8_t)(bg_nonpremul >> 16);
+  frame_meta->bg_g = (uint8_t)(bg_nonpremul >> 8);
+  frame_meta->bg_b = (uint8_t)bg_nonpremul;
+  frame_meta->bg_a = (uint8_t)(bg_nonpremul >> 24);
+
+  dec_meta->err = WUFFS_WASM_OK;
+  dec_meta->width = width;
+  dec_meta->height = height;
+  dec_meta->stride = width * 4;
+  dec_meta->bytes_written = (uint32_t)need;
+  dec_meta->format = fourcc;
+  return WUFFS_WASM_OK;
+}
+
+__attribute__((export_name("wuffs_decode_frame"))) int32_t
+wuffs_wasm_decode_frame(uint32_t src_off, uint32_t src_len, uint32_t dst_off,
+                         uint32_t dst_cap, uint32_t decode_meta_off,
+                         uint32_t frame_meta_off, int32_t index) {
+  return decode_frame(src_off, src_len, dst_off, dst_cap, decode_meta_off,
+                       frame_meta_off, index);
+}
+
 __attribute__((export_name("wuffs_version"))) uint32_t wuffs_wasm_version(void) {
   return (uint32_t)WUFFS_VERSION;
 }

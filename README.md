@@ -23,21 +23,21 @@ image decoders; the Go package only **verifies** the formats listed under
 
 ### Supported (tested)
 
-| Format | Notes                                  |
-| ------ | -------------------------------------- |
-| PNG    | Still images                           |
-| WebP   | Lossless WebP only (tested)            |
-| BMP    | Still images                           |
-| GIF    | First frame only (see limitations)     |
-| JPEG   | Baseline JPEG                          |
-| NPBM   | Binary PGM P5 / PPM P6 subset          |
-| QOI    | QOI format                             |
-| TGA    | Documented type/depth subset           |
-| WBMP   | Type 0 only                            |
-| ETC2   | PKM fixture subset                     |
-| HNSM   | Handsum; still images                  |
-| NIE    | Still images; frame zero only          |
-| TH     | Cooked ThumbHash only; raw unsupported |
+| Format | Notes                                          |
+| ------ | ---------------------------------------------- |
+| PNG    | Still images (first-frame-only)                |
+| WebP   | Lossless WebP only, still-only (no animation)  |
+| BMP    | Still images                                   |
+| GIF    | Multi-frame animation via DecodeFrame          |
+| JPEG   | Baseline JPEG                                  |
+| NPBM   | Binary PGM P5 / PPM P6 subset                  |
+| QOI    | QOI format                                     |
+| TGA    | Documented type/depth subset                   |
+| WBMP   | Type 0 only                                    |
+| ETC2   | PKM fixture subset                             |
+| HNSM   | Handsum; still images                          |
+| NIE    | Still images (frame zero) plus nïA multi-frame |
+| TH     | Cooked ThumbHash only; raw unsupported         |
 
 ### Verified subsets
 
@@ -54,6 +54,43 @@ image decoders; the Go package only **verifies** the formats listed under
   are unsupported.
 - **WBMP** supports Type 0 with canonical shortest-form dimension encodings
   and nonzero dimensions no greater than 0xFFFFFF.
+- **GIF** animation is verified multi-frame via DecodeFrame GIF animation.
+- **NIE** supports still nïE images (still images, frame zero) and verified nïA multi-frame animation.
+
+### Animation
+
+Multi-frame animation is verified for GIF and NIE nïA multi-frame via
+`FrameCount`, `LoopCount`, and `DecodeFrame`. `DecodeRGBA` decodes frame 0.
+PNG remains first-frame-only still images, and WebP remains still-only
+(lossless, no alpha, no animation).
+
+```go
+d := wuffs.New()
+meta, err := d.Probe(src)
+if err != nil {
+	panic(err)
+}
+if err := d.Reserve(int(meta.Stride)*int(meta.Height), len(src)); err != nil {
+	panic(err)
+}
+n, err := d.FrameCount(src)
+if err != nil {
+	panic(err)
+}
+loops, err := d.LoopCount(src)
+if err != nil {
+	panic(err)
+}
+dst := image.NewRGBA(image.Rect(0, 0, int(meta.Width), int(meta.Height)))
+for i := 0; i < n; i++ {
+	frame, err := d.DecodeFrame(dst, src, i)
+	if err != nil {
+		panic(err)
+	}
+	_ = frame
+}
+_ = loops
+```
 
 ### Not yet verified
 
@@ -66,7 +103,7 @@ Formats outside [Wuffs image decoders](https://github.com/google/wuffs/blob/main
 
 ### Current limitations
 
-- **Still images / first frame only** — animated GIF and WebP decode frame 0; no multi-frame API yet.
+- **Animation** — multi-frame `DecodeFrame` is verified for GIF and NIE nïA; PNG is first-frame-only and WebP is still-only with no animation.
 - **Output** — caller-owned `image.RGBA`, `image.NRGBA`, or `image.Gray`
   buffers (straight, non-premultiplied color; Gray uses one byte per pixel).
 - **No metadata API** — EXIF, ICC profiles, and similar are not exposed.

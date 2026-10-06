@@ -14,7 +14,7 @@
 `(*Decoder).FrameCount`, `(*Decoder).LoopCount`, and `(*Decoder).DecodeFrame`; refactor
 `DecodeRGBA` to delegate to `DecodeFrame(dst, src, 0)`; extend the wasm guest with
 frame-walking and indexed frame decode exports; verify multi-frame behavior on upstream
-Wuffs fixtures for GIF, animated WebP, and NIE nïA; publish documentation, API-boundary
+Wuffs fixtures for GIF and NIE nïA; publish documentation, API-boundary
 inventory, architecture diagrams, and roadmap completion evidence.
 
 This plan does not implement `META-01`, package-level animation helpers, or
@@ -45,11 +45,10 @@ If the sources conflict, stop and report the conflict. Preflight verifies `CORE-
 Multi-frame integration evidence uses exactly these fixtures copied from
 `../wuffs/test/data/` into `testdata/`:
 
-| Fixture | Role |
-| ------- | ---- |
-| `muybridge.gif` | GIF multi-frame count, loop metadata, per-frame decode |
-| `animated-red-blue.gif` | GIF disposal / bounds / duration oracle |
-| `hippopotamus.masked-with-muybridge.lossy.webp` | Animated lossy WebP multi-frame |
+| Fixture                 | Role                                                     |
+| ----------------------- | -------------------------------------------------------- |
+| `muybridge.gif`         | GIF multi-frame count, loop metadata, per-frame decode   |
+| `animated-red-blue.gif` | GIF disposal / bounds / duration oracle                  |
 | `animated-red-blue.nia` | NIE nïA multi-frame (extends FORMAT-03 frame-zero limit) |
 
 Still-image regression fixtures (`bricks-nodither.png`, `bricks-color.lossless.webp`,
@@ -69,8 +68,9 @@ registration; ANIM-01 does not add APNG fixtures or advertise PNG multi-frame su
   or alias `Pix`.
 - Only `Reserve` grows guest scratch; `FrameCount`, `LoopCount`, `DecodeFrame`, and
   `Probe` never auto-grow guest memory.
-- `DecodeFrame` writes straight RGBA into the caller buffer only within `Frame.Bounds`;
-  it does not clear pixels outside `Frame.Bounds`.
+- `DecodeFrame` writes the indexed frame's own (delta) pixels as straight RGBA into the
+  caller buffer only within `Frame.Bounds`; it does not composite prior frames, and it
+  does not clear or modify pixels outside `Frame.Bounds`.
 - `DecodeRGBA(dst, src)` equals `DecodeFrame(dst, src, 0)` for pixels and returned
   `*Meta` semantics; the `*Frame` value from index `0` is not returned by `DecodeRGBA`.
 - Reusable hot path: after `Reserve` and a sized `dst`, successful `DecodeFrame` for
@@ -143,11 +143,13 @@ Implementation rules:
   `wuffs_base__image_decoder__num_animation_loops`.
 - `wuffs_decode_frame` validates `index` against the frame count; out of range sets
   `WUFFS_WASM_ERR_DECODE` on decode meta.
-- `wuffs_decode_frame` replays frames `0..index` on the full-canvas dst scratch using
-  Wuffs `decode_frame` semantics (compositing into the canvas buffer); the host copies
-  only the `Frame.Bounds` sub-rectangle from scratch BGRA into caller `dst.Pix` (partial
-  writes; pixels outside `Bounds` in `dst` are untouched—matches Task 6 zeroed `Pix` per
-  index).
+- `wuffs_decode_frame` advances the decoder to frame `index` (config walk, skipping prior
+  frames' pixel data as Wuffs requires) and runs a single `decode_frame` for that index
+  into the canvas-sized dst scratch with SRC (replace) blend so the scratch `Bounds` region
+  holds the indexed frame's own (delta) pixels. It does not composite prior frames into
+  scratch for the purpose of filling `dst`; the host copies only the `Frame.Bounds`
+  sub-rectangle from scratch BGRA into caller `dst.Pix` (partial writes; pixels outside
+  `Bounds` in `dst` are untouched—matches Task 6 zeroed `Pix` per index).
 - Each export rewinds the bump allocator at entry (same as `decode_image` / `probe_image`).
 - Flicks-to-`time.Duration` on the host: `time.Duration(flicks) * time.Second / 705600000`.
 - `count_out_off` and `loops_out_off` are **not** caller-supplied; the host passes offsets
@@ -160,11 +162,11 @@ Implementation rules:
 
 Sizes must match the C structs in `wasm/shim.c`:
 
-| Slot | Bytes | C type / role |
-| ---- | ----- | ------------- |
-| Frame count out | 4 | `int32_t` written by `wuffs_frame_count` |
-| Animation loops out | 4 | `uint32_t` written by `wuffs_animation_loops` |
-| Frame meta | 48 | `wuffs_wasm_frame_meta` (8-byte-aligned struct) |
+| Slot                | Bytes | C type / role                                   |
+| ------------------- | ----- | ----------------------------------------------- |
+| Frame count out     | 4     | `int32_t` written by `wuffs_frame_count`        |
+| Animation loops out | 4     | `uint32_t` written by `wuffs_animation_loops`   |
+| Frame meta          | 48    | `wuffs_wasm_frame_meta` (8-byte-aligned struct) |
 
 Define in `memory.go` (with existing `metaSlotBytes`):
 
@@ -220,15 +222,15 @@ Executors **must not** edit this plan file. On any trigger below (or any global 
 **STOP**, message the user (task id, evidence), **no commit**, **no next task** until
 written user direction.
 
-| # | Trigger | Executor action |
-|---|---------|-----------------|
-| 1 | Preflight check fails | STOP — notify user |
-| 2 | Plan step contradicts runtime, libs, or tests | STOP — notify user |
-| 3 | Verify fails for reason not explained by current RED/GREEN step | STOP — notify user |
-| 4 | Required file not in task whitelist | STOP — notify user |
-| 5 | `make generate` changes files outside `wasm/shim.c`, `wasm/wuffs.wasm`, `internal/wuffswasm/wuffs.go` | STOP — notify user |
-| 6 | Upstream fixture missing at `../wuffs/test/data/<name>` | STOP — notify user |
-| 7 | Wuffs guest API cannot implement frame index without undocumented behavior | STOP — notify user with shim evidence |
+| # | Trigger                                                                                               | Executor action                       |
+| - | ----------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| 1 | Preflight check fails                                                                                 | STOP — notify user                    |
+| 2 | Plan step contradicts runtime, libs, or tests                                                         | STOP — notify user                    |
+| 3 | Verify fails for reason not explained by current RED/GREEN step                                       | STOP — notify user                    |
+| 4 | Required file not in task whitelist                                                                   | STOP — notify user                    |
+| 5 | `make generate` changes files outside `wasm/shim.c`, `wasm/wuffs.wasm`, `internal/wuffswasm/wuffs.go` | STOP — notify user                    |
+| 6 | Upstream fixture missing at `../wuffs/test/data/<name>`                                               | STOP — notify user                    |
+| 7 | Wuffs guest API cannot implement frame index without undocumented behavior                            | STOP — notify user with shim evidence |
 
 ---
 
@@ -244,10 +246,9 @@ written user direction.
 3. Copy `plans/api-roadmap.md` to
    `tmp/anim-01-animation-apis/api-roadmap.pre-execution.md` and
    `chmod a-w` the copy.
-4. Copy all four verified animation fixtures from `../wuffs/test/data/` into `testdata/`
+4. Copy all three verified animation fixtures from `../wuffs/test/data/` into `testdata/`
    (create `testdata/` entries; update `testdata/README` with one-line provenance per file):
-   `muybridge.gif`, `animated-red-blue.gif`,
-   `hippopotamus.masked-with-muybridge.lossy.webp`, `animated-red-blue.nia`.
+   `muybridge.gif`, `animated-red-blue.gif`, `animated-red-blue.nia`.
 5. Record `BASELINE_HEAD`, `BASELINE_PI_SHA256`, `BASELINE_ROADMAP_SHA256`, and
    `BASELINE_ROADMAP_SNAPSHOT` in `tmp/pi_progress.md` (create the file).
 6. Change only the `ANIM-01` row in `plans/api-roadmap.md`: status `Ready` →
@@ -258,10 +259,9 @@ written user direction.
 
 ### Allowed files
 
-- `testdata/muybridge.gif`, `testdata/animated-red-blue.gif`,
-  `testdata/hippopotamus.masked-with-muybridge.lossy.webp`, `testdata/animated-red-blue.nia`
+- `testdata/muybridge.gif`, `testdata/animated-red-blue.gif`, `testdata/animated-red-blue.nia`
   (new copies from upstream)
-- `testdata/README` (provenance lines for the four animation fixtures)
+- `testdata/README` (provenance lines for the three animation fixtures)
 - `plans/api-roadmap.md` (`ANIM-01` status `Ready` → `In progress` only)
 - `tmp/pi_progress.md`, `tmp/anim-01-animation-apis/` (baseline evidence and
   `preflight.log`; gitignored — write but **do not stage**)
@@ -278,7 +278,6 @@ git diff --cached --name-only
 git diff --name-only
 test -f ../wuffs/test/data/muybridge.gif
 test -f ../wuffs/test/data/animated-red-blue.gif
-test -f ../wuffs/test/data/hippopotamus.masked-with-muybridge.lossy.webp
 test -f ../wuffs/test/data/animated-red-blue.nia
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - .pi | sha256sum
 sha256sum tmp/anim-01-animation-apis/api-roadmap.pre-execution.md
@@ -288,8 +287,8 @@ sha256sum tmp/anim-01-animation-apis/api-roadmap.pre-execution.md
 
 - `CORE-02` is `Complete` and `ANIM-01` is `Ready` in `plans/api-roadmap.md` (verified by
   preflight grep commands).
-- All four upstream fixtures exist.
-- All four animation fixtures are present under `testdata/` on disk (copied in preflight step 4)
+- All three upstream fixtures exist.
+- All three animation fixtures are present under `testdata/` on disk (copied in preflight step 4)
   before Task 3 runs.
 - `ANIM-01` is `In progress` with this plan path.
 - `tmp/pi_progress.md` contains baseline hashes.
@@ -305,9 +304,8 @@ sha256sum tmp/anim-01-animation-apis/api-roadmap.pre-execution.md
 - `frame.go` (new)
 - `frame_declaration_test.go` (new)
 - `api_boundary_test.go`
-- `testdata/muybridge.gif`, `testdata/animated-red-blue.gif`,
-  `testdata/hippopotamus.masked-with-muybridge.lossy.webp`, `testdata/animated-red-blue.nia`
-- `testdata/README` (provenance lines for the four animation fixtures from preflight)
+- `testdata/muybridge.gif`, `testdata/animated-red-blue.gif`, `testdata/animated-red-blue.nia`
+- `testdata/README` (provenance lines for the three animation fixtures from preflight)
 - `plans/api-roadmap.md` (no status change)
 
 ### RED
@@ -582,45 +580,6 @@ FORBIDDEN before commit: `make test`, `make test-race`, `make cover`, `go test .
 
 ---
 
-## Task 7 — Animated WebP characterization
-
-### Allowed files
-
-- `testdata/README`
-- `testdata/webp.animation.golden.manifest` (new)
-- `animation_webp_integration_test.go` (new)
-- `scripts/gen_animation_golden.go`
-
-### RED
-
-`TestIntegrationWebPAnimationCharacterization`:
-
-- `FrameCount` > `1` on the fixture (assert exact count constant from green run).
-- Per-frame decode CRCs against manifest for every frame index.
-- `DecodeRGBA` equals frame `0` decode for this file.
-- README limitation text is still wrong until Task 12; tests do not read README.
-
-### GREEN
-
-Extend `scripts/gen_animation_golden.go` to emit `testdata/webp.animation.golden.manifest`;
-run `go run ./scripts/gen_animation_golden.go`; implement test.
-
-### Verify
-
-```bash
-go test -run '^TestIntegrationWebPAnimationCharacterization$' -count=1 -v .
-make format-check
-go build ./...
-```
-
-FORBIDDEN before commit: `make test`, `make test-race`, `make cover`, `go test ./...`, or any test command not listed above.
-
-### Acceptance
-
-- Animated lossy WebP multi-frame path verified.
-
----
-
 ## Task 8 — NIE nïA multi-frame characterization
 
 ### Allowed files
@@ -801,7 +760,7 @@ FORBIDDEN before commit: `make test`, `make test-race`, `make cover`, `go test .
 
 Extend `TestIntegrationVerifiedFormatDocumentationInventory` to require animation inventory
 assertions (README and `API.md` mention animation APIs; NIE scope text changes from
-frame-zero-only to nïA multi-frame verified; GIF/WebP animation no longer listed as
+frame-zero-only to nïA multi-frame verified; GIF animation no longer listed as
 "first frame only" without documenting `DecodeFrame`; PNG remains first-frame-only;
 `ANIM-01` `In progress` or `Review` in roadmap).
 
@@ -814,10 +773,11 @@ documented wording exactly.
 ### Required documentation content
 
 1. **README.md** — Replace "first frame only" limitation with animation API summary;
-   document verified multi-frame formats (GIF, animated WebP, NIE nïA); keep PNG as
+   document verified multi-frame formats (GIF, NIE nïA); keep PNG as
    first-frame-only; show `FrameCount` / `DecodeFrame` call sequence in a code example.
-2. **API.md** — Update verified subsets: NIE includes nïA multi-frame; WebP includes
-   animated lossy fixture; add animation subsection under verified scope.
+2. **API.md** — Update verified subsets: NIE includes nïA multi-frame; WebP remains
+   still-only (lossless/lossy, no alpha, no animation); add animation subsection under
+   verified scope.
 3. **testdata/README** — List new fixtures and golden manifests.
 4. **docs/DEVELOPMENT.md** — Extend module layout and wasm export list; add **mermaid**
    diagram of host/guest flow including `wuffs_frame_count`, `wuffs_animation_loops`,
@@ -897,7 +857,7 @@ make test
 make test-race
 go build ./...
 go doc -all .
-go test -run 'Frame|Loop|DecodeFrame|DecodeRGBAFrameZero|GIFAnimation|WebPAnimation|NIEAnimation|PublicAPIBoundary|VerifiedFormatDocumentation' -count=1 -v .
+go test -run 'Frame|Loop|DecodeFrame|DecodeRGBAFrameZero|GIFAnimation|NIEAnimation|PublicAPIBoundary|VerifiedFormatDocumentation' -count=1 -v .
 git status --porcelain --untracked-files=all
 git diff --exit-code main...HEAD -- internal/wuffswasm/wuffs.go wasm/shim.c wasm/wuffs.wasm
 ```

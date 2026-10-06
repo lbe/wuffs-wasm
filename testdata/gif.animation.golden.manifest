@@ -1,0 +1,23 @@
+# Animation golden manifest. Each line records the CRC-32 (IEEE)
+# of the full-canvas straight RGBA bytes in the caller's image.RGBA
+# Pix after DecodeFrame(dst, src, index) on a fresh zeroed canvas
+# sized from Probe geometry. Format: "<file> <index> <crc32-hex>".
+muybridge.gif 0 95FC00D3
+muybridge.gif 1 AC08AC4D
+muybridge.gif 2 CBABF610
+muybridge.gif 3 8D5B97EC
+muybridge.gif 4 D1BFF3B5
+muybridge.gif 5 764C9192
+muybridge.gif 6 9F1186AA
+muybridge.gif 7 BC1F93D9
+muybridge.gif 8 C0F88A5B
+muybridge.gif 9 5994F6A7
+muybridge.gif 10 C0C8F800
+muybridge.gif 11 566EEEBA
+muybridge.gif 12 5C3B1D1D
+muybridge.gif 13 7D2D53EB
+muybridge.gif 14 091431D6
+animated-red-blue.gif 0 FC2B4F1B
+animated-red-blue.gif 1 9EEB5AEE
+animated-red-blue.gif 2 E756026F
+animated-red-blue.gif 3 E897CCCE

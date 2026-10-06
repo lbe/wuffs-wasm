@@ -62,7 +62,24 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 		if end := lay.dstOff + lay.dstLen; end > uint32(wlen) {
 			t.Errorf("dst slot out of bounds: off=%d len=%d end=%d wasmLen=%d", lay.dstOff, lay.dstLen, end, wlen)
 		}
-		// Ordered: meta < src < dst are monotonically increasing offsets.
+		// Ordered: animation scratch < meta < src < dst are monotonically
+		// increasing offsets.
+		if lay.countOutOff != lay.hostBase {
+			t.Errorf("countOutOff = %d, want hostBase %d", lay.countOutOff, lay.hostBase)
+		}
+		if lay.loopsOutOff != lay.countOutOff+uint32(frameCountOutSlotBytes) {
+			t.Errorf("loopsOutOff = %d, want countOutOff+%d", lay.loopsOutOff, lay.countOutOff+uint32(frameCountOutSlotBytes))
+		}
+		if lay.frameMetaOff != lay.countOutOff+8 {
+			t.Errorf("frameMetaOff = %d, want countOutOff+8", lay.frameMetaOff)
+		}
+		if lay.metaOff != lay.hostBase+uint32(hostAnimationScratchBytes) {
+			t.Errorf("metaOff = %d, want hostBase+%d", lay.metaOff, lay.hostBase+uint32(hostAnimationScratchBytes))
+		}
+		// Frame meta (48 bytes at frameMetaOff) must end at/before metaOff.
+		if lay.frameMetaOff+uint32(frameMetaSlotBytes) > lay.metaOff {
+			t.Errorf("frame meta overlaps decode meta: frameMetaEnd=%d metaOff=%d", lay.frameMetaOff+uint32(frameMetaSlotBytes), lay.metaOff)
+		}
 		if lay.metaOff >= lay.srcOff || lay.srcOff >= lay.dstOff {
 			t.Errorf("slots not monotonically ordered: meta=%d src=%d dst=%d", lay.metaOff, lay.srcOff, lay.dstOff)
 		}

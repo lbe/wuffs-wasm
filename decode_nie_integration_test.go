@@ -34,7 +34,7 @@ var (
 )
 
 // TestIntegrationNIEDecodeCharacterization verifies the NIE (Naive Image
-// Format) contract end-to-end against the live wasm guest. The fixtures and
+// Format) frame-zero contract end-to-end against the live wasm guest. The fixtures and
 // their canonical evidence come from testdata/nie.golden.manifest, which
 // records each vendored upstream fixture's reported dimensions, its wire
 // pixel encoding, and the CRC-32 (IEEE) of its frame-zero straight RGBA
@@ -48,9 +48,11 @@ var (
 //     CRC-32 AND to the independently derived per-pixel RGBA bytes, with the
 //     caller-owned destination layout preserved. The still fixtures cover
 //     BGRA non-premultiplied and premultiplied pixels at 8 and 16 bits per
-//     channel (bn4, bn8, bp4, bp8); the nïA container verifies only
-//     frame-zero behavior (later frames are neither decoded nor validated by
-//     FORMAT-03).
+//     channel (bn4, bn8, bp4, bp8); the nïA container's frame zero is
+//     additionally covered by the ANIM-01 nïA multi-frame characterization
+//     (TestIntegrationNIEAnimationCharacterization), which decodes all four
+//     frames of animated-red-blue.nia against
+//     testdata/nie.animation.golden.manifest.
 //   - Recognizable malformed frame-zero data or metadata required to reach
 //     frame zero (truncated payload, invalid configuration byte, width with
 //     the high bit set, inner NIE header mismatching the outer NIA config)

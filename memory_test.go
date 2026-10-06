@@ -42,6 +42,28 @@ func TestUnitMemoryLayout(t *testing.T) {
 		if overlaps(layout.srcOff, layout.srcLen, layout.dstOff, layout.dstLen) {
 			t.Error("src and dst slots overlap")
 		}
+
+		// Animation scratch sits at the start of the host slot region:
+		// count out at hostBase, loops out 4 bytes later, frame meta at
+		// the 8-byte-aligned offset hostBase+8, decode meta after 56 bytes.
+		if layout.countOutOff != layout.hostBase {
+			t.Errorf("countOutOff = %d, want hostBase %d", layout.countOutOff, layout.hostBase)
+		}
+		if layout.loopsOutOff != layout.countOutOff+4 {
+			t.Errorf("loopsOutOff = %d, want countOutOff+4 = %d", layout.loopsOutOff, layout.countOutOff+4)
+		}
+		if layout.frameMetaOff != layout.countOutOff+8 {
+			t.Errorf("frameMetaOff = %d, want countOutOff+8 = %d", layout.frameMetaOff, layout.countOutOff+8)
+		}
+		if layout.metaOff != layout.hostBase+uint32(hostAnimationScratchBytes) {
+			t.Errorf("metaOff = %d, want hostBase+%d = %d", layout.metaOff, hostAnimationScratchBytes, layout.hostBase+uint32(hostAnimationScratchBytes))
+		}
+		if hostAnimationScratchBytes != 56 {
+			t.Errorf("hostAnimationScratchBytes = %d, want 56 (align8(4+4+48))", hostAnimationScratchBytes)
+		}
+		if layout.frameMetaOff%8 != 0 {
+			t.Errorf("frameMetaOff = %d, want 8-byte alignment", layout.frameMetaOff)
+		}
 	})
 
 	t.Run("Reserve grows memory and updates offsets", func(t *testing.T) {

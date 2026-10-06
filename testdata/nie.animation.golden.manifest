@@ -1,0 +1,8 @@
+# Animation golden manifest. Each line records the CRC-32 (IEEE)
+# of the full-canvas straight RGBA bytes in the caller's image.RGBA
+# Pix after DecodeFrame(dst, src, index) on a fresh zeroed canvas
+# sized from Probe geometry. Format: "<file> <index> <crc32-hex>".
+animated-red-blue.nia 0 FC2B4F1B
+animated-red-blue.nia 1 D0F1B86D
+animated-red-blue.nia 2 F7E847DC
+animated-red-blue.nia 3 E2FF06B0

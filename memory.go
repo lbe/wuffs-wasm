@@ -24,6 +24,24 @@ const (
 	// Matches the C wuffs_wasm_decode_meta struct (6 × uint32 = 24 bytes).
 	metaSlotBytes = 24
 
+	// frameCountOutSlotBytes is the size of the frame-count out slot in
+	// bytes. Matches the int32 written by wuffs_frame_count.
+	frameCountOutSlotBytes = 4
+
+	// animationLoopsOutSlotBytes is the size of the animation-loops out
+	// slot in bytes. Matches the uint32 written by wuffs_animation_loops.
+	animationLoopsOutSlotBytes = 4
+
+	// frameMetaSlotBytes is the size of the frame-meta slot in bytes.
+	// Matches the C wuffs_wasm_frame_meta struct (48 bytes, 8-byte aligned).
+	frameMetaSlotBytes = 48
+
+	// hostAnimationScratchBytes is the 8-byte-aligned total of the count
+	// out, loops out, and frame meta slots at the start of the host slot
+	// region: frameCountOutSlotBytes + animationLoopsOutSlotBytes +
+	// frameMetaSlotBytes = 56, which is already 8-byte aligned.
+	hostAnimationScratchBytes = frameCountOutSlotBytes + animationLoopsOutSlotBytes + frameMetaSlotBytes
+
 	// hostSlotRegionBase is the minimum base offset in wasm linear memory
 	// where host-accessible slots begin. Guest code rejects meta_off == 0,
 	// so this must be non-zero and sufficiently large.
@@ -41,9 +59,10 @@ const (
 // align8 rounds n up to the next multiple of 8.
 func align8(n uint32) uint32 { return (n + 7) &^ 7 }
 
-// slotTotal returns the aligned total size of the meta, src, and dst slots.
+// slotTotal returns the aligned total size of the animation scratch, meta,
+// src, and dst slots.
 func slotTotal(dstBytes, srcBytes uint32) uint32 {
-	total := uint32(metaSlotBytes) + srcBytes + dstBytes
+	total := uint32(hostAnimationScratchBytes) + uint32(metaSlotBytes) + srcBytes + dstBytes
 	return align8(total)
 }
 
@@ -77,13 +96,16 @@ func resolveSlot(current uint32, requested int) (uint32, error) {
 // It is an internal implementation detail of guest scratch management, not part
 // of the public API.
 type slotLayout struct {
-	metaOff  uint32 // offset of metadata slot
-	metaLen  uint32 // size of metadata slot
-	srcOff   uint32 // offset of source data slot
-	srcLen   uint32 // allocated size of source slot
-	dstOff   uint32 // offset of destination data slot
-	dstLen   uint32 // allocated size of destination slot
-	hostBase uint32 // base of host slot region
+	countOutOff  uint32 // offset of frame-count out slot
+	loopsOutOff  uint32 // offset of animation-loops out slot
+	frameMetaOff uint32 // offset of frame-meta slot
+	metaOff      uint32 // offset of metadata slot
+	metaLen      uint32 // size of metadata slot
+	srcOff       uint32 // offset of source data slot
+	srcLen       uint32 // allocated size of source slot
+	dstOff       uint32 // offset of destination data slot
+	dstLen       uint32 // allocated size of destination slot
+	hostBase     uint32 // base of host slot region
 }
 
 // computeLayout computes the slot layout for the given memory size and slot
@@ -93,23 +115,31 @@ func computeLayout(memSize uint32, dstBytes, srcBytes uint32) slotLayout {
 	totalSlots := slotTotal(dstBytes, srcBytes)
 
 	// Place slots at the end of memory, but not below the host slot region base.
+	// Slot order (low -> high): animation scratch -> decode meta -> src -> dst.
 	base := memSize - totalSlots
 	if base < hostSlotRegionBase {
 		base = hostSlotRegionBase
 	}
 
-	metaOff := base
+	countOutOff := base
+	loopsOutOff := countOutOff + uint32(frameCountOutSlotBytes)
+	frameMetaOff := countOutOff + 8 // 8-byte-aligned start of frame meta
+
+	metaOff := base + uint32(hostAnimationScratchBytes)
 	srcOff := metaOff + uint32(metaSlotBytes)
 	dstOff := srcOff + srcBytes
 
 	return slotLayout{
-		metaOff:  metaOff,
-		metaLen:  uint32(metaSlotBytes),
-		srcOff:   srcOff,
-		srcLen:   srcBytes,
-		dstOff:   dstOff,
-		dstLen:   dstBytes,
-		hostBase: base,
+		countOutOff:  countOutOff,
+		loopsOutOff:  loopsOutOff,
+		frameMetaOff: frameMetaOff,
+		metaOff:      metaOff,
+		metaLen:      uint32(metaSlotBytes),
+		srcOff:       srcOff,
+		srcLen:       srcBytes,
+		dstOff:       dstOff,
+		dstLen:       dstBytes,
+		hostBase:     base,
 	}
 }
 
@@ -134,7 +164,7 @@ func (d *Decoder) Reserve(dstBytes, srcBytes int) error {
 
 	// Validate the complete slot layout arithmetic in uint64 before any
 	// conversion to uint32 or mutation of d.currentLayout.
-	total := uint64(metaSlotBytes) + uint64(newSrc) + uint64(newDst)
+	total := uint64(hostAnimationScratchBytes) + uint64(metaSlotBytes) + uint64(newSrc) + uint64(newDst)
 	if total < uint64(newSrc) || total < uint64(newDst) {
 		return errReserveInvalid
 	}

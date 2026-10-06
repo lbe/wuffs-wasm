@@ -104,14 +104,17 @@ make format                     # apply formatting via treefmt
 ## Module layout
 
 - `github.com/lbe/wuffs-wasm` (root package) is the consumer API: `wuffs.New`,
-  `Decoder.Probe`, `Decoder.DecodeRGBA`, `Decoder.Reserve`, `Meta` /
+  `Decoder.Probe`, `Decoder.DecodeRGBA`, `Decoder.FrameCount`,
+  `Decoder.LoopCount`, `Decoder.DecodeFrame`, `Decoder.Reserve`, `Meta` /
   `FormatPNG` / `FormatWEBP`, and the exported error types. Intended call
-  order is Probe → Reserve from `Meta.Stride*Meta.Height` → DecodeRGBA.
+  order is Probe → Reserve from `Meta.Stride*Meta.Height` → DecodeRGBA, or
+  Probe → Reserve → FrameCount → LoopCount → DecodeFrame for animation.
   See README for usage; `docs/package-capability-conversation.md` is the
   design conversation that set that order.
 - `wasm/shim.c` exports `wuffs_probe_image` (sniff + image config, no
-  pixels) and `wuffs_decode_image` (full frame). Changing either requires
-  `make generate`.
+  pixels), `wuffs_decode_image` (full frame), `wuffs_frame_count`,
+  `wuffs_animation_loops`, and `wuffs_decode_frame`. Changing any export
+  requires `make generate`.
 - `internal/wuffswasm/wuffs.go` is generated from `wasm/wuffs.wasm` by
   `wasm2go`. Do not edit it by hand; regenerate with `make generate`.
 
@@ -119,3 +122,32 @@ make format                     # apply formatting via treefmt
 
 Fixtures in `testdata/` are copied from `../wuffs/test/data/`. See
 `testdata/README` for license and source details.
+
+```mermaid
+flowchart LR
+  subgraph host [Go package wuffs]
+    FC[FrameCount]
+    LC[LoopCount]
+    DF[DecodeFrame]
+    DR[DecodeRGBA]
+    PR[Probe]
+    RS[Reserve]
+  end
+  subgraph guest [wasm shim.c]
+    WFC[wuffs_frame_count]
+    WAL[wuffs_animation_loops]
+    WDF[wuffs_decode_frame]
+    WPR[wuffs_probe_image]
+    WDI[wuffs_decode_image]
+  end
+  PR --> WPR
+  FC --> WFC
+  LC --> WAL
+  DF --> WDF
+  DR --> DF
+  RS -.->|after Reserve| PR
+  RS -.->|after Reserve| FC
+  RS -.->|after Reserve| LC
+  RS -.->|after Reserve| DF
+  RS -.->|after Reserve| DR
+```

@@ -1,5 +1,7 @@
 package wuffs
 
+import "image"
+
 // unpremultiply converts an alpha-premultiplied color channel to straight
 // alpha. It must not be called with a == 0.
 func unpremultiply(c, a uint8) uint8 {
@@ -50,10 +52,46 @@ func convertBGRAToStraight(dst []byte, dstStride int, src []byte, width, height 
 	}
 }
 
-// convertBGRAToRGBA copies width*height decoded BGRA pixels from src into
-// dst, producing straight (non-premultiplied) RGBA in Go image order.
-func convertBGRAToRGBA(dst []byte, dstStride int, src []byte, width, height int) {
-	convertBGRAToStraight(dst, dstStride, src, width, height)
+// convertBGRAToRGBARegion copies the Frame.Bounds sub-rectangle of a decoded
+// full-canvas BGRA-premultiplied scratch image into dst, producing straight
+// (non-premultiplied) RGBA in Go image order. Only pixels inside bounds are
+// written; pixels outside bounds in dst are untouched.
+//
+// bounds is the frame rectangle inside the overall width*height canvas
+// (half-open, canvas coordinates). dstStride is the number of bytes per row
+// in dst (may differ from canvas width*4). The source stride is always
+// canvas width*4 bytes.
+func convertBGRAToRGBARegion(dst []byte, dstStride int, src []byte, canvasWidth int, bounds image.Rectangle) {
+	srcStride := canvasWidth * 4
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		s := y*srcStride + bounds.Min.X*4
+		d := y*dstStride + bounds.Min.X*4
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			si := s + (x-bounds.Min.X)*4
+			di := d + (x-bounds.Min.X)*4
+			b := src[si+0]
+			g := src[si+1]
+			r := src[si+2]
+			a := src[si+3]
+			switch a {
+			case 0:
+				dst[di+0] = 0
+				dst[di+1] = 0
+				dst[di+2] = 0
+				dst[di+3] = 0
+			case 255:
+				dst[di+0] = r
+				dst[di+1] = g
+				dst[di+2] = b
+				dst[di+3] = 255
+			default:
+				dst[di+0] = unpremultiply(r, a)
+				dst[di+1] = unpremultiply(g, a)
+				dst[di+2] = unpremultiply(b, a)
+				dst[di+3] = a
+			}
+		}
+	}
 }
 
 // convertBGRAToNRGBA copies width*height decoded BGRA pixels from src into

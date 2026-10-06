@@ -1,10 +1,13 @@
 package wuffs
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"math"
+	"time"
 
 	wasihost "github.com/lbe/wasm2go-wasi-host"
 	"github.com/lbe/wuffs-wasm/internal/wuffswasm"
@@ -15,7 +18,8 @@ type Decoder struct {
 	module        *wuffswasm.Module
 	wasi          *wasihost.State
 	currentLayout slotLayout
-	lastMeta      Meta // reused Meta return value to avoid per-decode allocation; returned pointer aliases this field
+	lastMeta      Meta  // reused Meta return value to avoid per-decode allocation; returned pointer aliases this field
+	lastFrame     Frame // reused Frame return value to avoid per-decode allocation; returned pointer aliases this field
 }
 
 // New constructs a Decoder, initializing the wasm2go module and WASI host.
@@ -82,19 +86,13 @@ func (d *Decoder) checkSrcCapacity(src []byte) error {
 //
 // The returned Meta carries the decoded image dimensions and pixel format.
 func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
-	// Keep the pointer check ahead of all destination field access and decoding.
-	if dst == nil {
-		return nil, ErrBadImage
-	}
-	decMeta, wasmBGRA, err := d.decodeImageForDestination(dst.Rect, len(dst.Pix), dst.Stride, 4, src)
-	if err != nil {
+	// DecodeRGBA is DecodeFrame(dst, src, 0) without the *Frame value:
+	// frame 0 of a still image is the full canvas, so the indexed decode
+	// writes the same pixels and populates the same lastMeta. The *Frame
+	// return is discarded; the reusable lastMeta pointer is returned.
+	if _, err := d.DecodeFrame(dst, src, 0); err != nil {
 		return nil, err
 	}
-	width := int(decMeta.Width)
-	height := int(decMeta.Height)
-	convertBGRAToRGBA(dst.Pix, dst.Stride, wasmBGRA, width, height)
-
-	d.lastMeta = decMeta
 	return &d.lastMeta, nil
 }
 
@@ -320,6 +318,185 @@ func (d *Decoder) Probe(src []byte) (*Meta, error) {
 	decMeta := readMeta(memBytes, lay.metaOff)
 	d.lastMeta = decMeta
 	return &d.lastMeta, nil
+}
+
+// FrameCount walks the image frame configs in the wasm guest (no pixel
+// decompress) and returns the number of frames. Still images return 1.
+// The source must fit the reserved src-slot capacity: len(src) over the
+// capacity returns ErrSrcTooLarge before any guest call, and empty src
+// returns ErrDecode. FrameCount never calls memory.Grow or Reserve.
+func (d *Decoder) FrameCount(src []byte) (int, error) {
+	if err := d.checkSrcCapacity(src); err != nil {
+		return 0, err
+	}
+
+	lay := d.currentLayout
+	d.copySrcToSlot(lay, src)
+
+	// Zero the count-out scratch slot before the export.
+	mem := d.module.Xmemory()
+	memBytes := *mem.Slice()
+	binary.LittleEndian.PutUint32(memBytes[lay.countOutOff:lay.countOutOff+4], 0)
+
+	ret := d.module.Xwuffs_frame_count(
+		int32(lay.srcOff), int32(len(src)),
+		int32(lay.countOutOff),
+	)
+	if ret != 0 {
+		return 0, errFromGuestReturn(ret)
+	}
+
+	// Refresh memory view after guest call (guest may have grown memory).
+	memBytes = *d.module.Xmemory().Slice()
+	n := int(int32(binary.LittleEndian.Uint32(memBytes[lay.countOutOff : lay.countOutOff+4])))
+	if n <= 0 {
+		return 0, ErrDecode
+	}
+	return n, nil
+}
+
+// LoopCount reports the Wuffs num_animation_loops value for src. It is 0
+// for still images and for animated images that loop forever. The source
+// must fit the reserved src-slot capacity: len(src) over the capacity
+// returns ErrSrcTooLarge before any guest call, and empty src returns
+// ErrDecode. LoopCount never calls memory.Grow or Reserve.
+func (d *Decoder) LoopCount(src []byte) (uint32, error) {
+	if err := d.checkSrcCapacity(src); err != nil {
+		return 0, err
+	}
+
+	lay := d.currentLayout
+	d.copySrcToSlot(lay, src)
+
+	// Zero the loops-out scratch slot before the export.
+	mem := d.module.Xmemory()
+	memBytes := *mem.Slice()
+	binary.LittleEndian.PutUint32(memBytes[lay.loopsOutOff:lay.loopsOutOff+4], 0)
+
+	ret := d.module.Xwuffs_animation_loops(
+		int32(lay.srcOff), int32(len(src)),
+		int32(lay.loopsOutOff),
+	)
+	if ret != 0 {
+		return 0, errFromGuestReturn(ret)
+	}
+
+	// Refresh memory view after guest call (guest may have grown memory).
+	memBytes = *d.module.Xmemory().Slice()
+	return binary.LittleEndian.Uint32(memBytes[lay.loopsOutOff : lay.loopsOutOff+4]), nil
+}
+
+// readFrameMeta reads the wuffs_wasm_frame_meta struct (48 bytes, 8-byte
+// aligned) from the frame-meta scratch slot at the given offset in wasm
+// linear memory. Layout (little-endian): err int32 [0], index uint32 [4],
+// bounds_min_x [8], bounds_min_y [12], bounds_max_x [16], bounds_max_y [20],
+// duration_flicks uint64 [24], io_position uint64 [32], disposal [40],
+// overwrite [41], opaque [42], bg_r [43], bg_g [44], bg_b [45], bg_a [46]
+// (byte 47 is padding). An all-zero slot (short read) yields a zero Frame.
+func readFrameMeta(mem []byte, frameMetaOff uint32) Frame {
+	if uint64(frameMetaOff)+frameMetaSlotBytes > uint64(len(mem)) {
+		return Frame{}
+	}
+	slot := mem[frameMetaOff : frameMetaOff+frameMetaSlotBytes]
+	minX := int32(binary.LittleEndian.Uint32(slot[8:12]))
+	minY := int32(binary.LittleEndian.Uint32(slot[12:16]))
+	maxX := int32(binary.LittleEndian.Uint32(slot[16:20]))
+	maxY := int32(binary.LittleEndian.Uint32(slot[20:24]))
+	flicks := binary.LittleEndian.Uint64(slot[24:32])
+	return Frame{
+		Index:      int(binary.LittleEndian.Uint32(slot[4:8])),
+		Bounds:     image.Rect(int(minX), int(minY), int(maxX), int(maxY)),
+		Duration:   time.Duration(flicks) * time.Second / 705600000,
+		Disposal:   Disposal(slot[40]),
+		Opaque:     slot[42] == 1,
+		Overwrite:  slot[41] == 1,
+		Background: color.RGBA{R: slot[43], G: slot[44], B: slot[45], A: slot[46]},
+		IOPosition: binary.LittleEndian.Uint64(slot[32:40]),
+	}
+}
+
+// DecodeFrame decodes animation frame `index` (0-based) of src into the
+// caller-owned dst overall canvas (Probe width x height, same Pix contract
+// as DecodeRGBA), writing that frame's own (delta) pixels as straight RGBA
+// only within Frame.Bounds; pixels outside Bounds are untouched. `index`
+// must satisfy 0 <= index < FrameCount; out of range returns ErrDecode.
+// The caller composites using Frame Disposal, Overwrite, and Background.
+// dst validation, src-capacity checks, and guest error mapping match
+// DecodeRGBA, including *DstTooSmallError (matching ErrDstTooSmall) when
+// the guest dst slot is undersized. DecodeRGBA(dst, src) is
+// DecodeFrame(dst, src, 0) ignoring the *Frame. On success the reusable
+// lastMeta is populated from the decode meta (same fields as DecodeRGBA)
+// and the returned *Frame aliases the reusable lastFrame. DecodeFrame
+// never calls memory.Grow or Reserve.
+func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, error) {
+	// Keep the pointer check ahead of all destination field access and decoding.
+	if dst == nil {
+		return nil, ErrBadImage
+	}
+	if index < 0 || int64(index) > math.MaxInt32 {
+		return nil, ErrDecode
+	}
+	if err := d.checkSrcCapacity(src); err != nil {
+		return nil, err
+	}
+
+	lay := d.currentLayout
+	d.copySrcToSlot(lay, src)
+
+	// Zero the decode-meta and frame-meta scratch slots before the export.
+	mem := d.module.Xmemory()
+	memBytes := *mem.Slice()
+	for i := uint32(0); i < uint32(metaSlotBytes); i++ {
+		memBytes[lay.metaOff+i] = 0
+	}
+	for i := uint32(0); i < uint32(frameMetaSlotBytes); i++ {
+		memBytes[lay.frameMetaOff+i] = 0
+	}
+
+	ret := d.module.Xwuffs_decode_frame(
+		int32(lay.srcOff), int32(len(src)),
+		int32(lay.dstOff), int32(lay.dstLen),
+		int32(lay.metaOff), int32(lay.frameMetaOff),
+		int32(index),
+	)
+	if ret != 0 {
+		err := errFromGuestReturn(ret)
+		if ret == guestErrDstTooSmall {
+			memBytes = *d.module.Xmemory().Slice()
+			decMeta := readMeta(memBytes, lay.metaOff)
+			var dts *DstTooSmallError
+			if errors.As(err, &dts) {
+				dts.MinBytes = decMeta.Stride * decMeta.Height
+				dts.Width = decMeta.Width
+				dts.Height = decMeta.Height
+				dts.Stride = decMeta.Stride
+			}
+		}
+		return nil, err
+	}
+
+	// Refresh memory view after guest call (guest may have grown memory).
+	memBytes = *d.module.Xmemory().Slice()
+	decMeta := readMeta(memBytes, lay.metaOff)
+	width := int(decMeta.Width)
+	height := int(decMeta.Height)
+	if validationErr := validateDestination(dst.Rect, len(dst.Pix), dst.Stride, width, height, 4); validationErr != nil {
+		return nil, validationErr
+	}
+	frame := readFrameMeta(memBytes, lay.frameMetaOff)
+	if frame.Bounds.Empty() || frame.Bounds.Min.X < 0 || frame.Bounds.Min.Y < 0 ||
+		frame.Bounds.Max.X > width || frame.Bounds.Max.Y > height {
+		return nil, ErrDecode
+	}
+	wasmBGRA, err := decodedScratch(memBytes, lay, width, height)
+	if err != nil {
+		return nil, err
+	}
+	convertBGRAToRGBARegion(dst.Pix, dst.Stride, wasmBGRA, width, frame.Bounds)
+
+	d.lastMeta = decMeta
+	d.lastFrame = frame
+	return &d.lastFrame, nil
 }
 
 // copySrcToSlot copies src into the wasm src slot at lay.srcOff. Callers must
