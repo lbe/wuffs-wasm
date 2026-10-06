@@ -116,7 +116,7 @@ guest memory internally.
 | `FORMAT-03` | Verify remaining-image batch: ETC2, HNSM, NIE, TH | TDD       | `.pi/tdd-plans/format-03-remaining-images.yaml`   | `CORE-01`           | Yes           | `Complete`    |
 | `REG-01`    | Register verified formats                         | TDD       | `.pi/tdd-plans/reg-01-register-formats.yaml`      | `ADAPT-01`, formats | No            | `Complete`    |
 | `ANIM-01`   | Animation APIs                                    | TDD       | `plans/anim-01-animation-apis.md`                 | `CORE-02`           | Yes           | `Complete`    |
-| `META-01`   | Metadata APIs                                     | TDD       | To be created                                     | `CORE-02`           | Yes           | `Not planned` |
+| `META-01`   | Metadata APIs                                     | Runbook   | `plans/meta-01-metadata-apis.md`                  | `CORE-02`           | Yes           | `Ready`       |
 
 ## Dependency graph
 
