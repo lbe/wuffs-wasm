@@ -31,9 +31,13 @@ changes, pixel decode changes, animation APIs, or new image format verification.
 3. Confirm `ANIM-01` and all format workstreams remain `Complete`.
 4. Confirm sibling checkout exists: `../wuffs/test/data/` (upstream Wuffs test
    fixtures). If missing, **do not start Pi** — worker STOP gate 6 applies.
+5. Run `make format-check` from the repository root. If
+   `plans/meta-01-metadata-apis.md` fails, run `make format`, commit the
+   reformatted plan on `main`, then create branch `meta-01-metadata-apis`.
 
 Workers must not edit the roadmap from `Not planned` to `Ready`. That is owner
-prep above.
+prep above. Workers must not edit this plan file during execution unless the
+user authorizes a one-time formatting fix.
 
 ---
 
@@ -68,15 +72,15 @@ If sources conflict, stop and report the conflict. Preflight verifies `CORE-02`
 Copy these from `../wuffs/test/data/` into `testdata/` during **Preflight
 only**. Record one-line provenance in `testdata/README`.
 
-| Fixture | Role |
-| ------- | ---- |
-| `bricks-color.png` | PNG with **no** ancillary metadata (all absent) |
-| `bricks-dither.png` | PNG with **cHRM**, **gAMA**, and **sRGB** (parsed) |
-| `artificial-png/exif.png` | PNG with **EXIF** (raw blob) |
-| `red-blue-gradient.dcip3d65-no-chrm-no-gama.png` | PNG with **iCCP** |
-| `DCI-P3-D65.icc` | Oracle bytes for ICC profile (not an image input) |
-| `artificial-gif/metadata-full.gif` | GIF with **ICCP** and **XMP** application extensions |
-| `artificial-gif/metadata-empty.gif` | GIF with **no** metadata extensions |
+| Fixture                                          | Role                                                 |
+| ------------------------------------------------ | ---------------------------------------------------- |
+| `bricks-color.png`                               | PNG with **no** ancillary metadata (all absent)      |
+| `bricks-dither.png`                              | PNG with **cHRM**, **gAMA**, and **sRGB** (parsed)   |
+| `artificial-png/exif.png`                        | PNG with **EXIF** (raw blob)                         |
+| `red-blue-gradient.dcip3d65-no-chrm-no-gama.png` | PNG with **iCCP**                                    |
+| `DCI-P3-D65.icc`                                 | Oracle bytes for ICC profile (not an image input)    |
+| `artificial-gif/metadata-full.gif`               | GIF with **ICCP** and **XMP** application extensions |
+| `artificial-gif/metadata-empty.gif`              | GIF with **no** metadata extensions                  |
 
 Do not add metadata verification for every verified image format in this plan.
 PNG + GIF evidence is sufficient for META-01.
@@ -139,19 +143,41 @@ the new export. Pattern matches upstream `png.c` / `gif.c` tests and Wuffs
    - **`wuffs_base__note__metadata_reported`:** handle one metadata item (step 7), then continue loop.
    - **Any other status:** `WUFFS_WASM_ERR_DECODE`.
 7. On `metadata_reported`, call `wuffs_base__image_decoder__tell_me_more` in a
-   loop until the metadata item is fully consumed. For EXIF, repeat
-   `tell_me_more` until the passthrough range is empty (two-pass pattern in
-   `png.c` `test_wuffs_png_decode_metadata_exif`):
+   loop until the metadata item is fully consumed. Wuffs delivers metadata in
+   three flavors (`wuffs-v0.4.c`); the guest must handle all three used by the
+   verified fixtures:
    - **Parsed flavor** (`WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_PARSED`):
      read fourcc via `wuffs_base__more_information__metadata__fourcc`; merge into
      pack header (`CHRM`, `GAMA`, `SRGB`, `MTIM` when Wuffs reports it).
-   - **Raw passthrough flavor:** read fourcc and
-     `wuffs_base__more_information__metadata_raw_passthrough__range`; copy bytes
-     from `src` at `[min_incl, max_excl)` into the pack blob region (append in
-     stable order: EXIF, then ICC, then XMP — first-seen append per kind; at most
+   - **Raw passthrough flavor**
+     (`WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_RAW_PASSTHROUGH`): read
+     fourcc and `wuffs_base__more_information__metadata_raw_passthrough__range`;
+     copy bytes from `src` at `[min_incl, max_excl)` into the pack blob
+     accumulators. **EXIF** (PNG) uses this flavor (`png.c`
+     `test_wuffs_png_decode_metadata_exif`); repeat `tell_me_more` until the
+     passthrough range is empty (two-pass pattern). **GIF ICC and GIF XMP** use
+     this flavor (`gif.c` `do_test_wuffs_gif_decode_metadata`); append chunk bytes
+     from `src` ranges into the ICC or XMP accumulator. **Do not** treat PNG iCCP
+     as raw passthrough.
+   - **Raw transform flavor**
+     (`WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_RAW_TRANSFORM`): **PNG
+     iCCP only** (`png.c` `test_wuffs_png_decode_metadata_iccp`). Pass a
+     non-empty destination `wuffs_base__io_buffer` to `tell_me_more`, not
+     `wuffs_base__empty_io_buffer()`. Allocate the destination backing store from
+     the bump allocator with length **1048576** bytes (1 MiB, ≤ `BUMP_LIMIT`).
+     Initialize `have.meta.wi = 0` and `have.meta.ri = 0` before each
+     `tell_me_more` call for one reported item. When `minfo.flavor` is
+     `METADATA_RAW_TRANSFORM` and fourcc is `WUFFS_BASE__FOURCC__ICCP`, loop
+     `tell_me_more` until status is OK (handle
+     `wuffs_base__suspension__even_more_information` like EXIF passthrough).
+     After each successful call with decompressed bytes, append
+     `have.data.ptr[0:have.meta.wi)` to the ICC accumulator (replace
+     `have.meta.wi` with the write index Wuffs sets). Do **not** use
+     `metadata_raw_passthrough__range` for this flavor. Reject
+     `METADATA_RAW_TRANSFORM` for fourccs other than `ICCP` with
+     `WUFFS_WASM_ERR_DECODE`.
+   - Pack blob order in linear memory remains EXIF, then ICC, then XMP (at most
      one blob per kind).
-   - **GIF ICC/XMP:** follow `gif.c` `do_test_wuffs_gif_decode_metadata` (raw
-     chunk bytes via `tell_me_more` into a temp buffer).
 8. Write the pack (header + blobs) into guest memory at `pack_off` with total
    size ≤ `pack_cap`. If the pack does not fit, set `meta->err` /
    return `WUFFS_WASM_ERR_DECODE` (do **not** add a new public Go error).
@@ -161,12 +187,12 @@ the new export. Pattern matches upstream `png.c` / `gif.c` tests and Wuffs
 
 **Numeric conversions (host, fixed):**
 
-| Wuffs input | Go `Metadata` field |
-| ----------- | ------------------- |
-| `metadata_parsed__chrm(i)` int32 scaled ×100000 | `Chromaticities` field `i/100000.0` (order: WhiteX, WhiteY, RedX, RedY, GreenX, GreenY, BlueX, BlueY for `i` 0..7) |
-| `metadata_parsed__gama()` uint32 ≈ 100000/γ | `HasGamma=true`, `Gamma = 100000.0 / float64(gama)` |
-| `metadata_parsed__srgb()` uint32 intent 0..3 | `HasSRGB=true`, `SRGB` = that uint32 (per `API.md` “as reported”) |
-| `has_modtime` in pack + `modtime_sec` / `modtime_nsec` | `HasModTime=true`, `ModTime=time.Unix(sec, nsec).UTC()` |
+| Wuffs input                                            | Go `Metadata` field                                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `metadata_parsed__chrm(i)` int32 scaled ×100000        | `Chromaticities` field `i/100000.0` (order: WhiteX, WhiteY, RedX, RedY, GreenX, GreenY, BlueX, BlueY for `i` 0..7) |
+| `metadata_parsed__gama()` uint32 ≈ 100000/γ            | `HasGamma=true`, `Gamma = 100000.0 / float64(gama)`                                                                |
+| `metadata_parsed__srgb()` uint32 intent 0..3           | `HasSRGB=true`, `SRGB` = that uint32 (per `API.md` “as reported”)                                                  |
+| `has_modtime` in pack + `modtime_sec` / `modtime_nsec` | `HasModTime=true`, `ModTime=time.Unix(sec, nsec).UTC()`                                                            |
 
 ---
 
@@ -264,15 +290,15 @@ Executors **must not** edit this plan file. On any trigger below (or any global 
 **STOP**, message the user (task id, evidence), **no commit**, **no next task** until
 written user direction.
 
-| # | Trigger | Executor action |
-| - | ------- | --------------- |
-| 1 | Preflight check fails | STOP — notify user |
-| 2 | Plan step contradicts runtime, libs, or tests | STOP — notify user |
-| 3 | Verify fails for reason not explained by current RED/GREEN step | STOP — notify user |
-| 4 | Required file not in task whitelist | STOP — notify user |
-| 5 | `make generate` changes files outside `wasm/shim.c`, `wasm/wuffs.wasm`, `internal/wuffswasm/wuffs.go` | STOP — notify user |
-| 6 | Upstream fixture missing at `../wuffs/test/data/<name>` | STOP — notify user |
-| 7 | Wuffs v0.4 cannot implement a required `API.md` metadata field with the algorithm in this plan | STOP — notify user with shim + Wuffs cite |
+| # | Trigger                                                                                               | Executor action                           |
+| - | ----------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| 1 | Preflight check fails                                                                                 | STOP — notify user                        |
+| 2 | Plan step contradicts runtime, libs, or tests                                                         | STOP — notify user                        |
+| 3 | Verify fails for reason not explained by current RED/GREEN step                                       | STOP — notify user                        |
+| 4 | Required file not in task whitelist                                                                   | STOP — notify user                        |
+| 5 | `make generate` changes files outside `wasm/shim.c`, `wasm/wuffs.wasm`, `internal/wuffswasm/wuffs.go` | STOP — notify user                        |
+| 6 | Upstream fixture missing at `../wuffs/test/data/<name>`                                               | STOP — notify user                        |
+| 7 | Wuffs v0.4 cannot implement a required `API.md` metadata field with the algorithm in this plan        | STOP — notify user with shim + Wuffs cite |
 
 ---
 
@@ -550,8 +576,11 @@ FORBIDDEN before commit: `make test`, `make test-race`, `make cover`, `go test .
 
 ### GREEN
 
-1. Fix guest ICC passthrough in `wasm/shim.c` (raw passthrough range append per **Wuffs
-   metadata algorithm** step 7).
+1. Fix guest PNG iCCP in `wasm/shim.c` per **Wuffs metadata algorithm** step 7
+   **Raw transform flavor** (`METADATA_RAW_TRANSFORM` + destination `io_buffer`;
+   oracle `png.c` `test_wuffs_png_decode_metadata_iccp`). Remove or narrow any
+   `METADATA_RAW_PASSTHROUGH` + `ICCP` path that assumes PNG iCCP bytes live in
+   `src` (GIF ICC stays passthrough for Task 6).
 2. Run `make generate`; commit wasm trio when `wasm/shim.c` changes.
 3. In `metadata.go`, copy ICC bytes from the guest pack into Go heap memory only when
    the pack header already reports `icc_len` and blob bytes are present.
@@ -568,7 +597,8 @@ FORBIDDEN before commit: `make test`, `make test-race`, `make cover`, `go test .
 
 ### Acceptance
 
-- ICC bytes equal `testdata/DCI-P3-D65.icc`.
+- ICC bytes equal `testdata/DCI-P3-D65.icc` (604 bytes, decompressed profile from
+  PNG iCCP via `METADATA_RAW_TRANSFORM`).
 
 ---
 
@@ -651,13 +681,19 @@ Tests:
 - `TestIntegrationMetadataErrors`: empty `src` → `ErrDecode`; oversized `src` →
   `ErrSrcTooLarge`; garbage header → `ErrUnknownFormat`.
 - `TestIntegrationMetadataCorruptEXIF`: build corrupt `src` in test only by copying
-  `testdata/artificial-png/exif.png` and flipping the final byte; `Metadata` returns
-  `ErrDecode` (malformed ancillary metadata inside a valid PNG container).
-- `TestIntegrationMetadataDoesNotAliasWasm`: after successful `Metadata` on a fixture
-  with non-nil `EXIF`, `ICC`, or `XMP`, capture returned blob slices; mutate bytes in
-  wasm memory at `lay.dstOff` through the pack blob region via
-  `memBytes := *d.module.Xmemory().Slice()`; confirm returned slices unchanged;
-  second `Metadata` call replaces slice contents (new heap copies).
+  `testdata/artificial-png/exif.png` and flipping **one structural PNG chunk field**,
+  not a data or CRC byte (eXIf payload bytes and IEND CRC are not validated under PNG
+  `IGNORE_CHECKSUM`). Flip byte index **0x24** (least-significant byte of the big-endian
+  eXIf chunk length at bytes `0x21..0x24`; value `0x0a` → `0xff` so declared length
+  exceeds `len(src)`); `Metadata` returns `ErrDecode`.
+- `TestIntegrationMetadataDoesNotAliasWasm`: after the first successful `Metadata` on
+  a fixture with non-nil `EXIF`, copy returned blob bytes into local variables (for
+  example `savedEXIF := append([]byte(nil), md.EXIF...)`); mutate bytes in wasm
+  memory at `lay.dstOff` through the pack blob region via
+  `memBytes := *d.module.Xmemory().Slice()`; assert `bytes.Equal(savedEXIF, ...)`
+  still holds. Call `Metadata` again on the same `src`; assert the new returned
+  slices are fresh heap copies (contents may match; saved first-call bytes must
+  still equal the first snapshot).
 - `TestIntegrationMetadataPreservesDecodeState`: `Probe` then `Metadata` on same
   decoder; `DecodeRGBA` golden unchanged on `bricks-color.png`.
 - `TestIntegrationMetadataProbeMetaUnchangedAfterMetadata`: `Probe` on
@@ -692,7 +728,56 @@ FORBIDDEN before commit: `make test`, `make test-race`, `make cover`, `go test .
 
 ---
 
+## Task 7.5 — Lint remediation (gate before Task 8)
+
+**Rationale:** Task 8 Verify includes `make lint`. Tasks 1–7 Verify blocks did not;
+pre-existing `govet` shadow and `staticcheck` unused findings in `metadata.go` and
+`metadata_integration_test.go` block Task 8 unless fixed here. Task 8’s whitelist
+is docs-only (STOP gate 4).
+
+### Allowed files
+
+- `metadata.go`
+- `metadata_integration_test.go`
+
+Do not edit `plans/meta-01-metadata-apis.md` in this task (owner amendment only).
+
+### Worker instructions
+
+1. **Shadow (`metadata_integration_test.go`):** Fix all `govet` shadow violations on
+   `err` (rename inner bindings from `Reserve` and similar, e.g. `reserveErr`).
+2. **Unused struct fields (`metadata.go`):** Use option **(a)** only — decode the
+   88-byte little-endian pack header into `metadataPackHeader` (helper such as
+   `metadataPackHeaderFromLE(hdr []byte) (metadataPackHeader, error)` is fine) and
+   read `(*Decoder).Metadata` fields from that struct (`exifLen`, `iccLen`, `format`,
+   flags, `gamaScaled`, `chrm`, `srgbIntent`, `modTimeSec`, `modTimeNsec`, etc.).
+   Preserve observable `Metadata` results and the same layout as today’s explicit
+   `hdr[…]` offsets. Keep `metadataPackHeader`, `metadataPackHeaderSize`, and
+   `TestUnitMetadataPackHeaderSize88` (Task 2 contract). Do **not** use
+   `//nolint` (runbook constraint 11).
+3. Do not change wasm, guest exports, or documentation in this task.
+
+### Verify
+
+```bash
+make lint
+go test -run 'Metadata' -count=1 -v .
+make format-check
+go build ./...
+```
+
+FORBIDDEN before commit: `make test`, `make test-race`, `make cover`, `go test ./...`, or any test command not listed above.
+
+### Acceptance
+
+- `make lint` passes with zero issues in allowed files (and no new lint debt elsewhere).
+- All `Metadata`-named tests in Verify pass; behavior unchanged aside from lint-safe refactors.
+
+---
+
 ## Task 8 — Documentation and documentation contract
+
+**Prerequisite:** Task 7.5 committed; `make lint` passes at HEAD before starting Task 8.
 
 ### Allowed files
 
@@ -814,8 +899,13 @@ go build ./...
 go doc -all .
 go test -run 'Metadata|PublicAPIBoundary|VerifiedFormatDocumentation' -count=1 -v .
 git status --porcelain --untracked-files=all
-git diff --exit-code main...HEAD -- internal/wuffswasm/wuffs.go wasm/shim.c wasm/wuffs.wasm
+git diff --exit-code HEAD -- internal/wuffswasm/wuffs.go wasm/shim.c wasm/wuffs.wasm
 ```
+
+The wasm trio line asserts **no uncommitted** changes to generated guest artifacts at
+the final gate (same intent as `core-02-public-api-boundary.md`). Do **not** use
+`main...HEAD` here: META-01 legitimately changes those files on the branch; that diff
+must exist, so `git diff --exit-code main...HEAD` would always fail.
 
 FORBIDDEN before commit: any file other than `plans/api-roadmap.md` in the Task 10 commit.
 
@@ -852,4 +942,24 @@ Progress file: tmp/pi_progress.md.
 Worker model: fast; do not refactor unrelated code.
 Do not push unless I instruct.
 Begin with Preflight only after META-01 is Ready in plans/api-roadmap.md.
+```
+
+**Resume after Task 8 STOP (lint / whitelist):**
+
+```text
+Plan amended: Task 7.5 — Lint remediation is inserted before Task 8.
+Commit the plan amendment on branch meta-01-metadata-apis if not already at HEAD.
+Execute Task 7.5 → Task 8 → Task 9 → Task 10 in order (skip Preflight and Tasks 1–7).
+Task 8 doc changes may already exist uncommitted at STOP; complete Task 8 Verify and commit.
+Follow plans/pi-runbook.md; progress file: tmp/pi_progress.md.
+Do not push unless I instruct.
+```
+
+**Resume after Task 10 STOP (wasm trio `git diff`):**
+
+```text
+Plan amended: Task 10 Verify wasm line is git diff --exit-code HEAD -- internal/wuffswasm/wuffs.go wasm/shim.c wasm/wuffs.wasm (not main...HEAD).
+Commit the plan amendment if not at HEAD.
+Re-run Task 10 only: full Verify block, final-gates.log, roadmap Review → Complete, commit roadmap only.
+Do not push unless I instruct.
 ```

@@ -18,8 +18,9 @@ type Decoder struct {
 	module        *wuffswasm.Module
 	wasi          *wasihost.State
 	currentLayout slotLayout
-	lastMeta      Meta  // reused Meta return value to avoid per-decode allocation; returned pointer aliases this field
-	lastFrame     Frame // reused Frame return value to avoid per-decode allocation; returned pointer aliases this field
+	lastMeta      Meta     // reused Meta return value to avoid per-decode allocation; returned pointer aliases this field
+	lastFrame     Frame    // reused Frame return value to avoid per-decode allocation; returned pointer aliases this field
+	lastMetadata  Metadata // reused Metadata return value; blob slices are replaced each successful call
 }
 
 // New constructs a Decoder, initializing the wasm2go module and WASI host.

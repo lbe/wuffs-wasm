@@ -116,12 +116,12 @@ func TestUnitPublicAPIBoundary(t *testing.T) {
 	}
 
 	// Required inventory.
-	wantConsts := []string{"FormatPNG", "FormatWEBP", "FormatBMP", "FormatETC2", "FormatGIF", "FormatHNSM", "FormatJPEG", "FormatNIE", "FormatNPBM", "FormatQOI", "FormatTH", "FormatTGA", "FormatWBMP", "DisposalNone", "DisposalRestoreBackground", "DisposalRestorePrevious"}
+	wantConsts := []string{"FormatPNG", "FormatWEBP", "FormatBMP", "FormatETC2", "FormatGIF", "FormatHNSM", "FormatJPEG", "FormatNIE", "FormatNPBM", "FormatQOI", "FormatTH", "FormatTGA", "FormatWBMP", "DisposalNone", "DisposalRestoreBackground", "DisposalRestorePrevious", "MetaEXIF", "MetaICCP", "MetaXMP", "MetaGAMA", "MetaCHRM", "MetaSRGB", "MetaMTIM"}
 	wantVars := []string{"ErrBadImage", "ErrDecode", "ErrDstTooSmall", "ErrSrcTooLarge", "ErrUnknownFormat"}
-	wantTypes := []string{"Decoder", "DstTooSmallError", "Meta", "Frame", "Disposal"}
+	wantTypes := []string{"Decoder", "DstTooSmallError", "Meta", "Frame", "Disposal", "Metadata", "Chromaticities"}
 	wantFuncs := []string{"New", "Probe", "Decode", "DecodeConfig", "DecodeGray", "DecodeNRGBA", "DecodeReader", "DecodeConfigReader", "RegisterFormats"}
 	wantMethods := map[string][]string{
-		"Decoder":          {"DecodeFrame", "DecodeGray", "DecodeNRGBA", "DecodeRGBA", "FrameCount", "LoopCount", "Probe", "Reserve", "Version", "VersionNum"},
+		"Decoder":          {"DecodeFrame", "DecodeGray", "DecodeNRGBA", "DecodeRGBA", "FrameCount", "LoopCount", "Metadata", "Probe", "Reserve", "Version", "VersionNum"},
 		"DstTooSmallError": {"Error", "Is"},
 	}
 	wantFields := map[string][]string{
@@ -130,6 +130,8 @@ func TestUnitPublicAPIBoundary(t *testing.T) {
 		"Decoder":          {}, // none exported
 		"Frame":            {"Index", "Bounds", "Duration", "Disposal", "Opaque", "Overwrite", "Background", "IOPosition"},
 		"Disposal":         {}, // kind uint8, no fields
+		"Metadata":         {"Format", "EXIF", "ICC", "XMP", "HasGamma", "Gamma", "HasChromaticities", "Chromaticities", "HasSRGB", "SRGB", "HasModTime", "ModTime"},
+		"Chromaticities":   {"WhiteX", "WhiteY", "RedX", "RedY", "GreenX", "GreenY", "BlueX", "BlueY"},
 	}
 
 	// Report MISSING and UNEXPECTED clearly.

@@ -105,7 +105,8 @@ make format                     # apply formatting via treefmt
 
 - `github.com/lbe/wuffs-wasm` (root package) is the consumer API: `wuffs.New`,
   `Decoder.Probe`, `Decoder.DecodeRGBA`, `Decoder.FrameCount`,
-  `Decoder.LoopCount`, `Decoder.DecodeFrame`, `Decoder.Reserve`, `Meta` /
+  `Decoder.LoopCount`, `Decoder.DecodeFrame`, `Decoder.Metadata`,
+  `Decoder.Reserve`, `Meta` /
   `FormatPNG` / `FormatWEBP`, and the exported error types. Intended call
   order is Probe → Reserve from `Meta.Stride*Meta.Height` → DecodeRGBA, or
   Probe → Reserve → FrameCount → LoopCount → DecodeFrame for animation.
@@ -113,8 +114,11 @@ make format                     # apply formatting via treefmt
   design conversation that set that order.
 - `wasm/shim.c` exports `wuffs_probe_image` (sniff + image config, no
   pixels), `wuffs_decode_image` (full frame), `wuffs_frame_count`,
-  `wuffs_animation_loops`, and `wuffs_decode_frame`. Changing any export
-  requires `make generate`.
+  `wuffs_animation_loops`, `wuffs_decode_frame`, and
+  `wuffs_read_image_metadata` (metadata-only walk, no pixels). Changing any
+  export requires `make generate`.
+- The guest writes a `metadata pack` (header + EXIF/ICC/XMP blobs) into
+  guest dst scratch, and the host parses it and copies blobs to Go heap.
 - `internal/wuffswasm/wuffs.go` is generated from `wasm/wuffs.wasm` by
   `wasm2go`. Do not edit it by hand; regenerate with `make generate`.
 

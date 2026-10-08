@@ -104,19 +104,19 @@ guest memory internally.
 
 ## Work registry
 
-| ID          | Capability                                        | Plan type | Plan file                                         | Depends on          | Guest changes | Status        |
-| ----------- | ------------------------------------------------- | --------- | ------------------------------------------------- | ------------------- | ------------- | ------------- |
-| `CORE-01`   | Explicit `Reserve` semantics                      | TDD       | `.pi/tdd-plans/enforce-explicit-reserve.yaml`     | Current baseline    | No            | `Complete`    |
-| `CORE-02`   | Remove accidental public exports                  | Runbook   | `plans/core-02-public-api-boundary.md`            | `CORE-01`           | No            | `Complete`    |
-| `STILL-01`  | `DecodeNRGBA` and `DecodeGray`                    | TDD       | `.pi/tdd-plans/still-01-decode-destinations.yaml` | `CORE-02`           | No            | `Complete`    |
-| `CONV-01`   | Package-level allocating decode helpers           | Runbook   | `plans/conv-01-adherence-remediation.md`          | `STILL-01`          | No            | `Complete`    |
-| `ADAPT-01`  | Reader and config adapters                        | TDD       | `.pi/tdd-plans/adapt-01-reader-adapters.yaml`     | `CONV-01`           | No            | `Complete`    |
-| `FORMAT-01` | Verify common-image batch: BMP, GIF, JPEG         | TDD       | `.pi/tdd-plans/format-01-common-images.yaml`      | `CORE-01`           | No            | `Complete`    |
-| `FORMAT-02` | Verify portable-image batch: NPBM, QOI, TGA, WBMP | TDD       | `.pi/tdd-plans/format-02-portable-images.yaml`    | `CORE-01`           | Yes           | `Complete`    |
-| `FORMAT-03` | Verify remaining-image batch: ETC2, HNSM, NIE, TH | TDD       | `.pi/tdd-plans/format-03-remaining-images.yaml`   | `CORE-01`           | Yes           | `Complete`    |
-| `REG-01`    | Register verified formats                         | TDD       | `.pi/tdd-plans/reg-01-register-formats.yaml`      | `ADAPT-01`, formats | No            | `Complete`    |
-| `ANIM-01`   | Animation APIs                                    | TDD       | `plans/anim-01-animation-apis.md`                 | `CORE-02`           | Yes           | `Complete`    |
-| `META-01`   | Metadata APIs                                     | Runbook   | `plans/meta-01-metadata-apis.md`                  | `CORE-02`           | Yes           | `Ready`       |
+| ID          | Capability                                        | Plan type | Plan file                                         | Depends on          | Guest changes | Status     |
+| ----------- | ------------------------------------------------- | --------- | ------------------------------------------------- | ------------------- | ------------- | ---------- |
+| `CORE-01`   | Explicit `Reserve` semantics                      | TDD       | `.pi/tdd-plans/enforce-explicit-reserve.yaml`     | Current baseline    | No            | `Complete` |
+| `CORE-02`   | Remove accidental public exports                  | Runbook   | `plans/core-02-public-api-boundary.md`            | `CORE-01`           | No            | `Complete` |
+| `STILL-01`  | `DecodeNRGBA` and `DecodeGray`                    | TDD       | `.pi/tdd-plans/still-01-decode-destinations.yaml` | `CORE-02`           | No            | `Complete` |
+| `CONV-01`   | Package-level allocating decode helpers           | Runbook   | `plans/conv-01-adherence-remediation.md`          | `STILL-01`          | No            | `Complete` |
+| `ADAPT-01`  | Reader and config adapters                        | TDD       | `.pi/tdd-plans/adapt-01-reader-adapters.yaml`     | `CONV-01`           | No            | `Complete` |
+| `FORMAT-01` | Verify common-image batch: BMP, GIF, JPEG         | TDD       | `.pi/tdd-plans/format-01-common-images.yaml`      | `CORE-01`           | No            | `Complete` |
+| `FORMAT-02` | Verify portable-image batch: NPBM, QOI, TGA, WBMP | TDD       | `.pi/tdd-plans/format-02-portable-images.yaml`    | `CORE-01`           | Yes           | `Complete` |
+| `FORMAT-03` | Verify remaining-image batch: ETC2, HNSM, NIE, TH | TDD       | `.pi/tdd-plans/format-03-remaining-images.yaml`   | `CORE-01`           | Yes           | `Complete` |
+| `REG-01`    | Register verified formats                         | TDD       | `.pi/tdd-plans/reg-01-register-formats.yaml`      | `ADAPT-01`, formats | No            | `Complete` |
+| `ANIM-01`   | Animation APIs                                    | TDD       | `plans/anim-01-animation-apis.md`                 | `CORE-02`           | Yes           | `Complete` |
+| `META-01`   | Metadata APIs                                     | Runbook   | `plans/meta-01-metadata-apis.md`                  | `CORE-02`           | Yes           | `Complete` |
 
 ## Dependency graph
 

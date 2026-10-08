@@ -43,6 +43,7 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 	readme := read("README.md")
 	testdataReadme := read("testdata/README")
 	roadmap := read("plans/api-roadmap.md")
+	dev := read("docs/DEVELOPMENT.md")
 
 	// The complete verified set: every Wuffs image decoder the guest ships is
 	// verified. Canonical reader names are lowercase; roadmap identifiers
@@ -405,5 +406,23 @@ func TestIntegrationVerifiedFormatDocumentationInventory(t *testing.T) {
 		t.Error("api-roadmap.md registry must keep ANIM-01")
 	} else if !strings.Contains(line, "In progress") && !strings.Contains(line, "Review") && !strings.Contains(line, "Complete") {
 		t.Errorf("ANIM-01 entry must be In progress, Review, or Complete; entry is: %s", line)
+	}
+
+	// META-01: metadata documentation inventory. README.md must document
+	// (*Decoder).Metadata, the Metadata and Chromaticities types, and the
+	// seven Meta* constants; the stale "No metadata API" limitation must be
+	// gone. docs/DEVELOPMENT.md must name the wuffs_read_image_metadata
+	// export, describe the metadata pack, and list Decoder.Metadata
+	// alongside the other Decoder entry points.
+	metadataAPIs := []string{"(*Decoder).Metadata", "Metadata", "Chromaticities", "MetaEXIF", "MetaICCP", "MetaXMP", "MetaGAMA", "MetaCHRM", "MetaSRGB", "MetaMTIM"}
+	if got := requireAll(readme, metadataAPIs); len(got) > 0 {
+		t.Errorf("README.md must document the metadata APIs (%v)", got)
+	}
+	if strings.Contains(readme, "No metadata API") {
+		t.Error("README.md must not claim No metadata API")
+	}
+	devAPIs := []string{"wuffs_read_image_metadata", "metadata pack", "Decoder.Metadata", "Decoder.Probe", "Decoder.DecodeRGBA", "Decoder.FrameCount", "Decoder.LoopCount", "Decoder.DecodeFrame"}
+	if got := requireAll(dev, devAPIs); len(got) > 0 {
+		t.Errorf("docs/DEVELOPMENT.md must document the metadata pack and Decoder APIs (%v)", got)
 	}
 }

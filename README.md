@@ -106,7 +106,7 @@ Formats outside [Wuffs image decoders](https://github.com/google/wuffs/blob/main
 - **Animation** — multi-frame `DecodeFrame` is verified for GIF and NIE nïA; PNG is first-frame-only and WebP is still-only with no animation.
 - **Output** — caller-owned `image.RGBA`, `image.NRGBA`, or `image.Gray`
   buffers (straight, non-premultiplied color; Gray uses one byte per pixel).
-- **No metadata API** — EXIF, ICC profiles, and similar are not exposed.
+- **Metadata** — `(*Decoder).Metadata` is an opt-in EXIF/ICC/XMP/gamma/chromaticities/sRGB/modification-time read that does not decode pixels; it returns the `Metadata` type with a `Chromaticities` value, keyed by `MetaEXIF`, `MetaICCP`, `MetaXMP`, `MetaGAMA`, `MetaCHRM`, `MetaSRGB`, `MetaMTIM`.
 
 ## Install
 

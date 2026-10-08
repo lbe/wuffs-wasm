@@ -889,6 +889,342 @@ wuffs_wasm_decode_frame(uint32_t src_off, uint32_t src_len, uint32_t dst_off,
                        frame_meta_off, index);
 }
 
+// wuffs_wasm_metadata_pack_header — written by read_image_metadata at
+// pack_off; header is little-endian, blobs follow at pack_off+88 in the
+// fixed order EXIF, ICC, XMP. Size MUST be 88 bytes (static_assert below).
+typedef struct wuffs_wasm_metadata_pack_header {
+  int32_t err;
+  uint32_t format;
+  uint32_t exif_len;
+  uint32_t icc_len;
+  uint32_t xmp_len;
+  uint8_t has_gamma;
+  uint8_t has_chrm;
+  uint8_t has_srgb;
+  uint8_t has_modtime;
+  uint8_t _pad0[3];
+  uint32_t gama_scaled;
+  int32_t chrm[8];
+  uint32_t srgb_intent;
+  int64_t modtime_sec;
+  int32_t modtime_nsec;
+} wuffs_wasm_metadata_pack_header;
+
+_Static_assert(sizeof(wuffs_wasm_metadata_pack_header) == 88,
+               "metadata pack header must be 88 bytes");
+
+enum { WUFFS_WASM_METADATA_PACK_HEADER_SIZE = 88 };
+
+// Raw-transform destination length (1 MiB) and ICC accumulator capacity
+// (1 MiB, so a full decompressed profile fits). EXIF and XMP accumulators
+// stay src_len: their bytes are subranges of src.
+enum { WUFFS_WASM_METADATA_HAVE_LEN = 1048576 };
+enum { WUFFS_WASM_METADATA_ICC_CAP = 1048576 };
+
+// read_image_metadata walks decode_image_config with set_report_metadata
+// enabled for EXIF, ICCP, XMP, GAMA, CHRM, SRGB, and MTIM, accumulating raw
+// passthrough blobs (EXIF/ICC/XMP) and parsed values (GAMA/CHRM/SRGB) into
+// the pack at pack_off. It decodes no pixels and calls no decode_frame.
+static int32_t read_image_metadata(uint32_t src_off, uint32_t src_len,
+                                   uint32_t pack_off, uint32_t pack_cap) {
+  if (pack_off == 0 || src_len == 0) {
+    return WUFFS_WASM_ERR_BAD_ARG;
+  }
+
+  // Rewind bump allocator for this call.
+  bump_rewind();
+
+  uint8_t* src_ptr = mem_ptr(src_off);
+  wuffs_wasm_metadata_pack_header* hdr =
+      (wuffs_wasm_metadata_pack_header*)mem_ptr(pack_off);
+
+  uint32_t fourcc = sniff_fourcc(src_ptr, src_len);
+  const wuffs_wasm_decoder_slot* slot = find_decoder(fourcc);
+  if (slot == NULL) {
+    memset(hdr, 0, sizeof(*hdr));
+    hdr->err = WUFFS_WASM_ERR_UNKNOWN_FORMAT;
+    hdr->format = 0;
+    return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
+  }
+
+  // Guard: the decoder object plus the temp blob buffers must fit the bump
+  // region. EXIF and XMP metadata bytes are subranges of src, so one
+  // src_len buffer per kind always suffices. The PNG iCCP profile arrives
+  // zlib-compressed via METADATA_RAW_TRANSFORM and is decompressed by Wuffs
+  // into the caller-supplied destination buffer, so the destination backing
+  // store and the ICC accumulator are each 1 MiB.
+  uint64_t blob_need = (uint64_t)WUFFS_WASM_METADATA_HAVE_LEN +
+                       (uint64_t)WUFFS_WASM_METADATA_ICC_CAP +
+                       (uint64_t)2 * (uint64_t)src_len;
+  if ((uint64_t)slot->obj_size > (uint64_t)BUMP_LIMIT ||
+      blob_need > (uint64_t)BUMP_LIMIT ||
+      (uint64_t)slot->obj_size + blob_need > (uint64_t)BUMP_LIMIT) {
+    memset(hdr, 0, sizeof(*hdr));
+    hdr->err = WUFFS_WASM_ERR_DECODE;
+    hdr->format = fourcc;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  // Allocate decoder object first, then the destination backing store and
+  // the three temp blob buffers.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  memset(dec, 0, slot->obj_size);
+  uint8_t* have_ptr = bump_alloc(WUFFS_WASM_METADATA_HAVE_LEN);
+  uint8_t* icc_buf = bump_alloc(WUFFS_WASM_METADATA_ICC_CAP);
+  uint8_t* exif_buf = bump_alloc(src_len);
+  uint8_t* xmp_buf = bump_alloc(src_len);
+  uint32_t exif_len = 0;
+  uint32_t icc_len = 0;
+  uint32_t xmp_len = 0;
+
+  // Destination buffer for METADATA_RAW_TRANSFORM items (PNG iCCP): Wuffs
+  // decompresses into have.data and reports bytes via have.meta.wi. PARSED
+  // and RAW_PASSTHROUGH flavors ignore a_dst, so passing `have` universally
+  // is safe.
+  wuffs_base__io_buffer have = {
+      .data = {.ptr = have_ptr, .len = WUFFS_WASM_METADATA_HAVE_LEN},
+      .meta = {.wi = 0, .ri = 0, .pos = 0, .closed = 0},
+  };
+
+  wuffs_base__status status =
+      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+  if (status.repr != NULL) {
+    memset(hdr, 0, sizeof(*hdr));
+    hdr->err = WUFFS_WASM_ERR_DECODE;
+    hdr->format = fourcc;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  wuffs_base__image_decoder* decoder = slot->upcast(dec);
+  if (fourcc == WUFFS_BASE__FOURCC__PNG) {
+    wuffs_base__image_decoder__set_quirk(
+        decoder, WUFFS_BASE__QUIRK_IGNORE_CHECKSUM, 1);
+  }
+
+  wuffs_base__image_decoder__set_report_metadata(
+      decoder, WUFFS_BASE__FOURCC__EXIF, true);
+  wuffs_base__image_decoder__set_report_metadata(
+      decoder, WUFFS_BASE__FOURCC__ICCP, true);
+  wuffs_base__image_decoder__set_report_metadata(
+      decoder, WUFFS_BASE__FOURCC__XMP, true);
+  wuffs_base__image_decoder__set_report_metadata(
+      decoder, WUFFS_BASE__FOURCC__GAMA, true);
+  wuffs_base__image_decoder__set_report_metadata(
+      decoder, WUFFS_BASE__FOURCC__CHRM, true);
+  wuffs_base__image_decoder__set_report_metadata(
+      decoder, WUFFS_BASE__FOURCC__SRGB, true);
+  wuffs_base__image_decoder__set_report_metadata(
+      decoder, WUFFS_BASE__FOURCC__MTIM, true);
+
+  wuffs_base__io_buffer src = {
+      .data = {.ptr = src_ptr, .len = src_len},
+      .meta = {.wi = src_len, .ri = 0, .pos = 0, .closed = 1},
+  };
+
+  uint8_t has_gamma = 0;
+  uint8_t has_chrm = 0;
+  uint8_t has_srgb = 0;
+  uint32_t gama_scaled = 0;
+  int32_t chrm[8] = {0};
+  uint32_t srgb_intent = 0;
+
+  wuffs_base__image_config ic = {0};
+  for (;;) {
+    status = wuffs_base__image_decoder__decode_image_config(decoder, &ic, &src);
+    if (status.repr == NULL) {
+      break;
+    }
+    if (status.repr != wuffs_base__note__metadata_reported) {
+      memset(hdr, 0, sizeof(*hdr));
+      hdr->err = WUFFS_WASM_ERR_DECODE;
+      hdr->format = fourcc;
+      return WUFFS_WASM_ERR_DECODE;
+    }
+
+    // Consume one reported metadata item via tell_me_more.
+    for (;;) {
+      have.meta.wi = 0;
+      have.meta.ri = 0;
+      wuffs_base__more_information minfo =
+          wuffs_base__empty_more_information();
+      status =
+          wuffs_base__image_decoder__tell_me_more(decoder, &have, &minfo, &src);
+      if (wuffs_base__status__is_error(&status)) {
+        memset(hdr, 0, sizeof(*hdr));
+        hdr->err = WUFFS_WASM_ERR_DECODE;
+        hdr->format = fourcc;
+        return WUFFS_WASM_ERR_DECODE;
+      }
+      if (minfo.flavor ==
+          WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_PARSED) {
+        uint32_t mfourcc =
+            wuffs_base__more_information__metadata__fourcc(&minfo);
+        if (mfourcc == WUFFS_BASE__FOURCC__CHRM) {
+          for (uint32_t i = 0; i < 8; i++) {
+            chrm[i] =
+                wuffs_base__more_information__metadata_parsed__chrm(&minfo, i);
+          }
+          has_chrm = 1;
+        } else if (mfourcc == WUFFS_BASE__FOURCC__GAMA) {
+          gama_scaled =
+              wuffs_base__more_information__metadata_parsed__gama(&minfo);
+          has_gamma = 1;
+        } else if (mfourcc == WUFFS_BASE__FOURCC__SRGB) {
+          srgb_intent =
+              wuffs_base__more_information__metadata_parsed__srgb(&minfo);
+          has_srgb = 1;
+        }
+        // MTIM has no v0.4 parsed helper and is never delivered; ignore.
+        break;
+      }
+      if (minfo.flavor ==
+          WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_RAW_PASSTHROUGH) {
+        uint32_t mfourcc =
+            wuffs_base__more_information__metadata__fourcc(&minfo);
+        wuffs_base__range_ie_u64 r =
+            wuffs_base__more_information__metadata_raw_passthrough__range(
+                &minfo);
+        uint64_t n = wuffs_base__range_ie_u64__length(&r);
+        if (n > 0) {
+          // Ranges index src bytes; reject ranges outside [0, src_len].
+          if (r.min_incl > r.max_excl || r.max_excl > (uint64_t)src_len) {
+            memset(hdr, 0, sizeof(*hdr));
+            hdr->err = WUFFS_WASM_ERR_DECODE;
+            hdr->format = fourcc;
+            return WUFFS_WASM_ERR_DECODE;
+          }
+          if (mfourcc == WUFFS_BASE__FOURCC__EXIF) {
+            if ((uint64_t)exif_len + n > (uint64_t)src_len) {
+              memset(hdr, 0, sizeof(*hdr));
+              hdr->err = WUFFS_WASM_ERR_DECODE;
+              hdr->format = fourcc;
+              return WUFFS_WASM_ERR_DECODE;
+            }
+            memcpy(exif_buf + exif_len, src_ptr + r.min_incl, (size_t)n);
+            exif_len += (uint32_t)n;
+          } else if (mfourcc == WUFFS_BASE__FOURCC__ICCP) {
+            if ((uint64_t)icc_len + n > (uint64_t)src_len) {
+              memset(hdr, 0, sizeof(*hdr));
+              hdr->err = WUFFS_WASM_ERR_DECODE;
+              hdr->format = fourcc;
+              return WUFFS_WASM_ERR_DECODE;
+            }
+            memcpy(icc_buf + icc_len, src_ptr + r.min_incl, (size_t)n);
+            icc_len += (uint32_t)n;
+          } else if (mfourcc == WUFFS_BASE__FOURCC__XMP) {
+            if ((uint64_t)xmp_len + n > (uint64_t)src_len) {
+              memset(hdr, 0, sizeof(*hdr));
+              hdr->err = WUFFS_WASM_ERR_DECODE;
+              hdr->format = fourcc;
+              return WUFFS_WASM_ERR_DECODE;
+            }
+            memcpy(xmp_buf + xmp_len, src_ptr + r.min_incl, (size_t)n);
+            xmp_len += (uint32_t)n;
+          }
+          // Other raw kinds are acknowledged by advancing but not stored.
+          if (r.max_excl > src.meta.ri) {
+            src.meta.ri = (size_t)r.max_excl;
+          }
+        }
+        if (wuffs_base__status__is_ok(&status)) {
+          break;
+        }
+        if (status.repr != wuffs_base__suspension__even_more_information) {
+          memset(hdr, 0, sizeof(*hdr));
+          hdr->err = WUFFS_WASM_ERR_DECODE;
+          hdr->format = fourcc;
+          return WUFFS_WASM_ERR_DECODE;
+        }
+        continue;
+      }
+      if (minfo.flavor ==
+          WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_RAW_TRANSFORM) {
+        // PNG iCCP only: Wuffs zlib-decompresses the profile into `have`.
+        uint32_t mfourcc =
+            wuffs_base__more_information__metadata__fourcc(&minfo);
+        if (mfourcc != WUFFS_BASE__FOURCC__ICCP) {
+          memset(hdr, 0, sizeof(*hdr));
+          hdr->err = WUFFS_WASM_ERR_DECODE;
+          hdr->format = fourcc;
+          return WUFFS_WASM_ERR_DECODE;
+        }
+        uint64_t wi = have.meta.wi;
+        if (wi > 0) {
+          if ((uint64_t)icc_len + wi > (uint64_t)WUFFS_WASM_METADATA_ICC_CAP) {
+            memset(hdr, 0, sizeof(*hdr));
+            hdr->err = WUFFS_WASM_ERR_DECODE;
+            hdr->format = fourcc;
+            return WUFFS_WASM_ERR_DECODE;
+          }
+          memcpy(icc_buf + icc_len, have_ptr, (size_t)wi);
+          icc_len += (uint32_t)wi;
+        }
+        if (wuffs_base__status__is_ok(&status)) {
+          break;
+        }
+        if (status.repr != wuffs_base__suspension__even_more_information) {
+          memset(hdr, 0, sizeof(*hdr));
+          hdr->err = WUFFS_WASM_ERR_DECODE;
+          hdr->format = fourcc;
+          return WUFFS_WASM_ERR_DECODE;
+        }
+        continue;
+      }
+      memset(hdr, 0, sizeof(*hdr));
+      hdr->err = WUFFS_WASM_ERR_DECODE;
+      hdr->format = fourcc;
+      return WUFFS_WASM_ERR_DECODE;
+    }
+  }
+
+  uint64_t total = (uint64_t)WUFFS_WASM_METADATA_PACK_HEADER_SIZE +
+                   (uint64_t)exif_len + (uint64_t)icc_len + (uint64_t)xmp_len;
+  if (total > (uint64_t)pack_cap) {
+    memset(hdr, 0, sizeof(*hdr));
+    hdr->err = WUFFS_WASM_ERR_DECODE;
+    hdr->format = fourcc;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+
+  memset(hdr, 0, sizeof(*hdr));
+  hdr->err = WUFFS_WASM_OK;
+  hdr->format = fourcc;
+  hdr->exif_len = exif_len;
+  hdr->icc_len = icc_len;
+  hdr->xmp_len = xmp_len;
+  hdr->has_gamma = has_gamma;
+  hdr->has_chrm = has_chrm;
+  hdr->has_srgb = has_srgb;
+  hdr->has_modtime = 0;
+  hdr->gama_scaled = gama_scaled;
+  for (uint32_t i = 0; i < 8; i++) {
+    hdr->chrm[i] = chrm[i];
+  }
+  hdr->srgb_intent = srgb_intent;
+  hdr->modtime_sec = 0;
+  hdr->modtime_nsec = 0;
+
+  uint8_t* out = (uint8_t*)hdr + WUFFS_WASM_METADATA_PACK_HEADER_SIZE;
+  if (exif_len > 0) {
+    memcpy(out, exif_buf, exif_len);
+    out += exif_len;
+  }
+  if (icc_len > 0) {
+    memcpy(out, icc_buf, icc_len);
+    out += icc_len;
+  }
+  if (xmp_len > 0) {
+    memcpy(out, xmp_buf, xmp_len);
+  }
+  return WUFFS_WASM_OK;
+}
+
+__attribute__((export_name("wuffs_read_image_metadata"))) int32_t
+wuffs_wasm_read_image_metadata(uint32_t src_off, uint32_t src_len,
+                               uint32_t pack_off, uint32_t pack_cap) {
+  return read_image_metadata(src_off, src_len, pack_off, pack_cap);
+}
+
 __attribute__((export_name("wuffs_version"))) uint32_t wuffs_wasm_version(void) {
   return (uint32_t)WUFFS_VERSION;
 }

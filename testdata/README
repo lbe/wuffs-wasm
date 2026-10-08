@@ -281,3 +281,15 @@ caller's `image.RGBA` Pix after `DecodeFrame(dst, src, index)`. The values
 were recorded from the wasm decoder under test via
 `go run ./scripts/gen_animation_golden.go`; the per-frame values are listed
 in the manifest itself.
+
+## Metadata fixtures (META-01)
+
+- `bricks-color.png` - metadata fixture copied from `../wuffs/test/data/`
+- `bricks-dither.png` - metadata fixture copied from `../wuffs/test/data/`
+- `artificial-png/exif.png` - metadata fixture copied from `../wuffs/test/data/`
+- `red-blue-gradient.dcip3d65-no-chrm-no-gama.png` - metadata fixture copied from `../wuffs/test/data/`
+- `DCI-P3-D65.icc` - metadata fixture copied from `../wuffs/test/data/`
+- `artificial-gif/metadata-full.gif` - metadata fixture copied from `../wuffs/test/data/`
+- `artificial-gif/metadata-empty.gif` - metadata fixture copied from `../wuffs/test/data/`
+- `metadata-full.gif.metadata.golden` - META-01 GIF metadata golden (uint32 LE ICC len, uint32 LE XMP len, ICC, XMP), generated from `../wuffs/test/data/` metadata-full.gif oracle by `go run ./scripts/gen_metadata_golden.go`
+- `scripts/gen_metadata_golden.go` - META-01 GIF metadata golden generator for the golden above
