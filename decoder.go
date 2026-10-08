@@ -13,7 +13,16 @@ import (
 	"github.com/lbe/wuffs-wasm/internal/wuffswasm"
 )
 
-// Decoder wraps the wasm2go-generated wuffs module and WASI host state.
+// Decoder wraps the wasm2go-generated Wuffs module and WASI host state for
+// reusable []byte-oriented decode, animation, and metadata reads.
+//
+// Successful Probe, DecodeRGBA, DecodeFrame, and Metadata calls return
+// pointers that alias reusable fields on this Decoder (lastMeta, lastFrame,
+// lastMetadata). Do not retain those pointers across later calls on the same
+// Decoder unless you copy the data you need (Metadata blob slices are already
+// heap copies).
+//
+// A Decoder is not safe for concurrent use.
 type Decoder struct {
 	module        *wuffswasm.Module
 	wasi          *wasihost.State
@@ -23,9 +32,8 @@ type Decoder struct {
 	lastMetadata  Metadata // reused Metadata return value; blob slices are replaced each successful call
 }
 
-// New constructs a Decoder, initializing the wasm2go module and WASI host.
-// The module pointer is declared before the WASI state so the host memory
-// callback can capture its address before the module is instantiated.
+// New constructs a Decoder with default guest scratch: 128 KiB dst slot and
+// 64 KiB src capacity (raise both with Reserve before large inputs).
 func New() *Decoder {
 	var module *wuffswasm.Module
 	wasi := newWASIState(&module)

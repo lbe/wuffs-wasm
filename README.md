@@ -92,6 +92,29 @@ for i := 0; i < n; i++ {
 _ = loops
 ```
 
+### Metadata
+
+`Metadata` reads ancillary data without decoding pixels. It uses the same src
+capacity rules as `Probe` and needs at least 64 KiB of guest dst scratch (the
+default `New()` dst slot is 128 KiB). Call `Reserve` when `len(src)` exceeds
+the default 64 KiB src cap before `Metadata`, same as for `Probe`.
+
+```go
+d := wuffs.New()
+if err := d.Reserve(65536, len(src)); err != nil {
+	panic(err)
+}
+md, err := d.Metadata(src)
+if err != nil {
+	panic(err)
+}
+// md.EXIF, md.ICC, md.XMP are heap copies; md pointer is reused on the Decoder.
+_ = md
+```
+
+Metadata verification in tests covers PNG and GIF fixtures; other decoders may
+return absent fields until separately verified.
+
 ### Not yet verified
 
 No Wuffs image decoder remains deferred: FORMAT-03 verified ETC2, HNSM, NIE,
@@ -307,9 +330,16 @@ cfg, err := image.DecodeConfig(f)
 | `Probe(src)`                                                                                                                                                                         | Sniff format and dimensions without decoding pixels (allocates a temporary Decoder).                                                                                                                                                    |
 | `(*Decoder) Probe(src)`                                                                                                                                                              | Dimensions and format without decoding pixels on a reusable Decoder; returns `*Meta`.                                                                                                                                                   |
 | `(*Decoder) DecodeRGBA(dst, src)`                                                                                                                                                    | Decode a supported image into `dst`; returns `*Meta` on success.                                                                                                                                                                        |
-| `(*Decoder) Reserve(dstBytes, srcBytes)`                                                                                                                                             | Grow wasm src/dst slots before Probe or decode.                                                                                                                                                                                         |
+| `(*Decoder) DecodeNRGBA(dst, src)` / `DecodeGray(dst, src)`                                                                                                                          | Same ownership contract as `DecodeRGBA` for `*image.NRGBA` or `*image.Gray`.                                                                                                                                                            |
+| `(*Decoder) FrameCount(src)` / `LoopCount(src)`                                                                                                                                      | Animation frame count and loop count (still images: 1 frame, loop 0).                                                                                                                                                                   |
+| `(*Decoder) DecodeFrame(dst, src, index)`                                                                                                                                            | Decode one animation frame into the overall canvas; returns `*Frame`.                                                                                                                                                                   |
+| `(*Decoder) Metadata(src)`                                                                                                                                                           | Opt-in EXIF/ICC/XMP/gamma/chromaticities/sRGB/modification time; no pixels.                                                                                                                                                             |
+| `(*Decoder) Reserve(dstBytes, srcBytes)`                                                                                                                                             | Grow wasm src/dst slots before Probe, decode, animation, or metadata.                                                                                                                                                                   |
 | `(*Decoder) Version()` / `VersionNum()`                                                                                                                                              | Embedded Wuffs library version.                                                                                                                                                                                                         |
-| `Meta`, `FormatPNG`, `FormatWEBP`, `FormatBMP`, `FormatGIF`, `FormatJPEG`, `FormatNPBM`, `FormatQOI`, `FormatTGA`, `FormatWBMP`, `FormatETC2`, `FormatHNSM`, `FormatNIE`, `FormatTH` | Decode metadata; FourCC constants for probed/decoded format.                                                                                                                                                                            |
+| `Frame`, `Disposal`                                                                                                                                                                  | Per-frame bounds, duration, disposal, blend, and background for `DecodeFrame`.                                                                                                                                                          |
+| `Metadata`, `Chromaticities`                                                                                                                                                         | Metadata payload and parsed chromaticities from `Metadata`.                                                                                                                                                                             |
+| `MetaEXIF` … `MetaMTIM`                                                                                                                                                              | Metadata kind FourCC constants (`MetaEXIF`, `MetaICCP`, `MetaXMP`, `MetaGAMA`, `MetaCHRM`, `MetaSRGB`, `MetaMTIM`).                                                                                                                     |
+| `Meta`, `FormatPNG`, `FormatWEBP`, `FormatBMP`, `FormatGIF`, `FormatJPEG`, `FormatNPBM`, `FormatQOI`, `FormatTGA`, `FormatWBMP`, `FormatETC2`, `FormatHNSM`, `FormatNIE`, `FormatTH` | Image config from `Probe`/decode; image format FourCC constants.                                                                                                                                                                        |
 | `ErrUnknownFormat`, `ErrSrcTooLarge`, `ErrDecode`                                                                                                                                    | Sentinel errors.                                                                                                                                                                                                                        |
 | `ErrBadImage`                                                                                                                                                                        | `dst` Rect/Stride/Pix do not match the decoded image (empty/nil/size mismatch).                                                                                                                                                         |
 | `ErrDstTooSmall`                                                                                                                                                                     | Sentinel for a destination too small (host layout or guest scratch).                                                                                                                                                                    |

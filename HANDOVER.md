@@ -1,20 +1,20 @@
 # Handover — restore caller-owned `Pix`
 
-**Do not invent a new product.** Read `GOALS.md` and `API.md` first. `API.md`
-is the **complete** public contract. This file is only the first correction
-needed to match it: `DecodeRGBA` must write into the caller’s `Pix`.
+**Status (2026):** The `DecodeRGBA` caller-owned `Pix` correction and the rest
+of the `API.md` roadmap (still destinations, convenience APIs, formats,
+registration, animation, metadata) are **implemented**. For current usage read
+`README.md` and `API.md`; this file is retained as historical context for the
+original aliasing failure.
+
+---
+
+**Historical context.** Read `GOALS.md` and `API.md` first. `API.md` is the
+**complete** public contract. This file described the first correction needed to
+match it: `DecodeRGBA` must write into the caller’s `Pix`.
 
 The 17 Aug goal (restated 25 Aug): populate an existing `image.RGBA`; do not
-allocate or replace `Pix`. Execution aliased `dst.Pix` to wasm to pass an
-alloc-ceiling test. That is the bug.
-
-Ignore any “Step 1/2/3” numbering from prior agents. Probe and `Reserve` exist.
-`DecodeRGBA` does not meet `API.md`.
-
-**This pass implements the `DecodeRGBA` Pix contract only.** Do not build the
-rest of `API.md` (`DecodeNRGBA`, `DecodeGray`, animation, `Metadata`, package
-`Probe`/`Decode`, `RegisterFormats`, extra format constants) unless the owner
-asks.
+allocate or replace `Pix`. Early execution aliased `dst.Pix` to wasm to pass an
+alloc-ceiling test. That was the bug.
 
 ---
 

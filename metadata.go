@@ -102,8 +102,9 @@ type Metadata struct {
 	// SRGB is the Wuffs SRGB rendering-intent FourCC payload as reported.
 	SRGB uint32
 	// HasModTime reports whether ModTime holds the modification time.
+	// Many inputs never deliver MTIM; false and zero time mean absent.
 	HasModTime bool
-	// ModTime is the modification time from MTIM when present.
+	// ModTime is the modification time from MTIM when HasModTime (UTC).
 	ModTime time.Time
 }
 
@@ -138,9 +139,13 @@ const minimumMetadataDstSlotBytes = 64 * 1024 // 64 KiB
 // the guest wuffs_read_image_metadata export writes a pack into the guest
 // destination scratch slot (header + EXIF/ICC/XMP blobs, copied into fresh Go
 // heap slices). Metadata never calls Reserve or memory.Grow: the dst slot
-// must already hold at least 64 KiB, else ErrDecode. Parsed Wuffs values
-// (gamma, chromaticities, sRGB intent) are converted per the plan's numeric
-// conversion table.
+// must already hold at least 64 KiB, else ErrDecode. Gamma uses
+// 100000/gama_scaled; chromaticities divide Wuffs int32×100000 scalars by
+// 100000; SRGB carries the Wuffs intent uint32 as reported.
+//
+// On success the returned *Metadata aliases the Decoder's lastMetadata until
+// the next successful Metadata call. EXIF, ICC, and XMP slices are fresh heap
+// copies safe to retain.
 func (d *Decoder) Metadata(src []byte) (*Metadata, error) {
 	if err := d.checkSrcCapacity(src); err != nil {
 		return nil, err
