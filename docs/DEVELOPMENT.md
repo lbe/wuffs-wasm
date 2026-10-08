@@ -70,7 +70,7 @@ sibling `wuffs-mirror-release-c` checkout. Test fixtures are copied from
 
 ## Prerequisites
 
-- Go 1.26.5 or later
+- Go 1.27.0 or later
 - `wasm2go` on your `PATH`
 - Network access for the first wasm build (the WASI SDK is downloaded
   automatically)

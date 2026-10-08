@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/lbe/wuffs-wasm.svg)](https://pkg.go.dev/github.com/lbe/wuffs-wasm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Version](https://img.shields.io/badge/Go-1.26.5-blue.svg)](https://go.dev/dl/)
+[![Go Version](https://img.shields.io/badge/Go-1.27.0-blue.svg)](https://go.dev/dl/)
 [![Release](https://github.com/lbe/wuffs-wasm/actions/workflows/releases.yml/badge.svg)](https://github.com/lbe/wuffs-wasm/actions/workflows/releases.yml)
 [![CI](https://github.com/lbe/wuffs-wasm/actions/workflows/ci.yml/badge.svg)](https://github.com/lbe/wuffs-wasm/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/lbe/wuffs-wasm/branch/main/graph/badge.svg)](https://codecov.io/gh/lbe/wuffs-wasm)
@@ -137,7 +137,7 @@ Formats outside [Wuffs image decoders](https://github.com/google/wuffs/blob/main
 go get github.com/lbe/wuffs-wasm
 ```
 
-Requires Go 1.26.5 or later.
+Requires Go 1.27.0 or later.
 
 ## Usage
 
