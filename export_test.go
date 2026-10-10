@@ -1,9 +1,21 @@
 package wuffs
 
-import "unsafe"
+import (
+	"testing"
+	"unsafe"
+)
 
 // Exported for tests: exposes internal helpers so that tests in other packages
 // (or bench tests) can drive decoder behavior without widening the public API.
+
+// BenchFixturesOK reports whether all gitignored M/L benchmark fixtures exist locally.
+func BenchFixturesOK() bool { return benchFixturesOK() }
+
+// RequireBenchFixtures fails the benchmark when M/L fixtures are missing.
+func RequireBenchFixtures(tb testing.TB) { requireBenchFixtures(tb) }
+
+// SkipBenchFixturesIfMissing skips record tests when M/L fixtures are missing (CI).
+func SkipBenchFixturesIfMissing(tb testing.TB) { skipBenchFixturesIfMissing(tb) }
 
 // ShrunkMaxSrc returns a compressed source-slot capacity used by host-side
 // ErrSrcTooLarge enforcement. It is a test-only hook so that integration tests

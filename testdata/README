@@ -1,5 +1,10 @@
 # Test Fixtures
 
+M/L benchmark inputs are **not** stored here; see `testdata/bench/README.md`
+and run `make bench-fixtures` from the repo root.
+
+## Committed S-tier fixtures
+
 Vendored test fixtures from the Wuffs project.
 
 ## License

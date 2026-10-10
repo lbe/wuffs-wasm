@@ -7,7 +7,7 @@ PKG ?= ./...
 # dprint for markdown, shfmt for bash. Override with: make format TREEFMT=dprint
 TREEFMT ?= treefmt
 
-.PHONY: help
+.PHONY: bench-fixtures help
 help:
 	@echo "Available targets:"
 	@echo "  make cover         - Generate coverage report"
@@ -17,11 +17,16 @@ help:
 	@echo "  make lint          - Run golangci-lint"
 	@echo "  make test          - Run tests for $(PKG)"
 	@echo "  make test-race     - Run tests with race detector"
+	@echo "  make bench-fixtures - Download M/L benchmark fixtures (network)"
 	@echo "  make wasm          - Compile wasm/shim.c → wasm/wuffs.wasm"
 	@echo ""
 	@echo "Environment variables:"
 	@echo "  PKG=<path>         - Override package (default: $(PKG))"
 	@echo "  ARGS=<flags>       - Extra flags passed to go test (e.g. -v -count=1)"
+
+.PHONY: bench-fixtures
+bench-fixtures:
+	bash scripts/fetch_bench_fixtures.sh
 
 .PHONY: wasm
 wasm:

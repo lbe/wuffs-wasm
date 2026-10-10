@@ -349,7 +349,8 @@ A `Decoder` is not safe for concurrent use. Use one decoder per goroutine, or se
 
 ## Performance
 
-Benchmarks pair wuffs-go with `image/png` on the same fixtures. On the decode
+Benchmarks pair wuffs-go with stdlib decoders on PNG, WebP, GIF, and JPEG
+fixtures (S-tier in `testdata/`; M/L via `make bench-fixtures`). On the decode
 hot path, wuffs-go is faster with **zero Go heap allocations**: once the caller
 has allocated a correctly sized `image.RGBA` and called `Reserve`, repeated
 `DecodeRGBA` calls into that reused destination allocate nothing (verified:
@@ -359,7 +360,7 @@ destination allocation and `Reserve` are setup cost, not part of the reusable
 `DecodeRGBA` path.
 
 ```bash
-go test -bench='PNG_' -benchmem -count=3 -run=^$
+go test -bench='PNG_|DecodeRGBA_(WEBP|GIF|JPEG)_|Stdlib(WEBP|GIF|JPEG)_' -benchmem -count=3 -run=^$
 ```
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for benchmark interpretation and the full developer workflow.

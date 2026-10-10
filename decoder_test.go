@@ -7,7 +7,10 @@ import (
 	"hash/crc32"
 	"image"
 	"image/color"
+	"image/gif"
+	"image/jpeg"
 	"image/png"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,6 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/lbe/wuffs-wasm"
+	"golang.org/x/image/webp"
 )
 
 // loadFixture reads a file from the testdata directory and fails the test on error.
@@ -29,6 +33,72 @@ func loadFixture(t *testing.T, name string) []byte {
 		t.Fatalf("reading testdata/%s: %v", name, err)
 	}
 	return data
+}
+
+func loadBenchFixture(t *testing.T, rel string) []byte {
+	t.Helper()
+	wuffs.SkipBenchFixturesIfMissing(t)
+	data, err := os.ReadFile(filepath.Join("testdata/bench", rel))
+	if err != nil {
+		t.Fatalf("reading testdata/bench/%s: %v", rel, err)
+	}
+	return data
+}
+
+func logBaselineComparison(t *testing.T, tag string, compressedLen, iterations int, elapsedW, elapsedS time.Duration) {
+	nsW := elapsedW.Nanoseconds() / int64(iterations)
+	nsS := elapsedS.Nanoseconds() / int64(iterations)
+	msW := float64(nsW) / 1e6
+	msS := float64(nsS) / 1e6
+	mbW := float64(compressedLen) * float64(iterations) / elapsedW.Seconds() / (1024 * 1024)
+	mbS := float64(compressedLen) * float64(iterations) / elapsedS.Seconds() / (1024 * 1024)
+	t.Logf("comparison %s: wuffs-go %.3f ms/op (%d ns/op) vs stdlib %.3f ms/op (%d ns/op)",
+		tag, msW, nsW, msS, nsS)
+	t.Logf("comparison %s throughput (secondary): wuffs-go %.2f MB/s vs stdlib %.2f MB/s",
+		tag, mbW, mbS)
+}
+
+func recordDecodeBaseline(
+	t *testing.T,
+	tag string,
+	src []byte,
+	wantW, wantH int,
+	stdlibDecode func(io.Reader) (image.Image, error),
+) {
+	d := wuffs.New()
+	dstBytes := wantW * wantH * 4
+	if resErr := wuffs.RequiredReserve(d, dstBytes, len(src)); resErr != nil {
+		t.Fatalf("RequiredReserve: %v", resErr)
+	}
+
+	const iterations = 10
+	dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
+
+	start := time.Now()
+	var (
+		meta *wuffs.Meta
+		err  error
+	)
+	for i := 0; i < iterations; i++ {
+		meta, err = d.DecodeRGBA(dst, src)
+		if err != nil {
+			t.Fatalf("DecodeRGBA iteration %d: %v", i, err)
+		}
+	}
+	elapsed := time.Since(start)
+
+	start2 := time.Now()
+	for i := 0; i < iterations; i++ {
+		if _, err := stdlibDecode(bytes.NewReader(src)); err != nil {
+			t.Fatalf("stdlib decode iteration %d: %v", i, err)
+		}
+	}
+	elapsed2 := time.Since(start2)
+
+	logBaselineComparison(t, tag, len(src), iterations, elapsed, elapsed2)
+	if meta == nil {
+		t.Fatal("DecodeRGBA returned nil Meta")
+	}
 }
 
 // anyNonZeroPixels reports whether dst contains at least one non-zero pixel.
@@ -601,7 +671,8 @@ func TestIntegrationReserveRetry(t *testing.T) {
 }
 
 // TestBenchmarkPNGBaselineRecord measures decode throughput for a realistic
-// PNG (harvesters.png 1165×859 RGBA, ~1.99 MB src) and logs MB/s and ns/op.
+// PNG (harvesters.png 1165×859 RGBA, ~1.99 MB src) and logs ms/op first,
+// with MB/s as a secondary metric.
 // It uses the RequiredReserve test helper to explicitly size the dst slot
 // (~4 MiB) before the timed decode loop. The test passes if decode succeeds;
 // no throughput assertion is made — human go/no-go after Plan 1.
@@ -609,63 +680,76 @@ func TestIntegrationReserveRetry(t *testing.T) {
 // A successful decode implicitly verifies that the guest bump allocator
 // region is not exceeded for this large PNG fixture.
 func TestBenchmarkPNGBaselineRecord(t *testing.T) {
-	pngSrc := loadFixture(t, "harvesters.png")
+	pngSrc := loadBenchFixture(t, "l/harvesters.png")
+	recordDecodeBaseline(t, "harvesters-png", pngSrc, 1165, 859, png.Decode)
+}
 
-	d := wuffs.New()
+// TestBenchmarkWEBPBaselineRecord measures decode throughput for the
+// lossless WebP fixture (bricks-color.lossless.webp 160×120) and logs ms/op
+// first for both wuffs and the stdlib counterpart (webp.Decode). The
+// test passes if decode succeeds; no throughput assertion is made — human
+// go/no-go only.
+func TestBenchmarkWEBPBaselineRecord(t *testing.T) {
+	webpSrc := loadFixture(t, "bricks-color.lossless.webp")
+	recordDecodeBaseline(t, "webp-bricks-color", webpSrc, 160, 120, webp.Decode)
+}
 
-	// harvesters.png is 1165×859 RGBA → ~4 MiB decoded.
-	const (
-		wantW    = 1165
-		wantH    = 859
-		dstBytes = wantW * wantH * 4
-	)
-	srcBytes := len(pngSrc)
+// TestBenchmarkGIFBaselineRecord measures decode throughput for the still
+// GIF fixture (bricks-nodither.gif 160×120) and logs ms/op first for both
+// wuffs and the stdlib counterpart (gif.Decode). The test passes if decode
+// succeeds; no throughput assertion is made — human go/no-go only.
+func TestBenchmarkGIFBaselineRecord(t *testing.T) {
+	gifSrc := loadFixture(t, "bricks-nodither.gif")
+	recordDecodeBaseline(t, "gif-bricks-nodither", gifSrc, 160, 120, gif.Decode)
+}
 
-	// Reserve memory using the test helper with explicit sizes.
-	if resErr := wuffs.RequiredReserve(d, dstBytes, srcBytes); resErr != nil {
-		t.Fatalf("RequiredReserve: %v", resErr)
-	}
+// TestBenchmarkJPEGBaselineRecord measures decode throughput for the JPEG
+// fixture (hat.jpeg 90×112) and logs ms/op first for both wuffs and the
+// stdlib counterpart (jpeg.Decode). The test passes if decode succeeds; no
+// throughput assertion is made — human go/no-go only.
+func TestBenchmarkJPEGBaselineRecord(t *testing.T) {
+	jpegSrc := loadFixture(t, "hat.jpeg")
+	recordDecodeBaseline(t, "jpeg-hat", jpegSrc, 90, 112, jpeg.Decode)
+}
 
-	// Timed decode loop.
-	const iterations = 10
-	start := time.Now()
-	var (
-		meta *wuffs.Meta
-		err  error
-	)
-	dst := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
-	for i := 0; i < iterations; i++ {
-		meta, err = d.DecodeRGBA(dst, pngSrc)
-		if err != nil {
-			t.Fatalf("DecodeRGBA iteration %d: %v", i, err)
-		}
-	}
-	elapsed := time.Since(start)
+func TestBenchmarkPNGHibiscusRegularBaselineRecord(t *testing.T) {
+	src := loadBenchFixture(t, "m/hibiscus.regular.png")
+	recordDecodeBaseline(t, "hibiscus-png", src, 312, 442, png.Decode)
+}
 
-	nsPerOp := elapsed.Nanoseconds() / iterations
-	throughputMB := float64(len(pngSrc)) * float64(iterations) / elapsed.Seconds() / (1024 * 1024)
+func TestBenchmarkJPEGHibiscusRegularBaselineRecord(t *testing.T) {
+	src := loadBenchFixture(t, "m/hibiscus.regular.jpeg")
+	recordDecodeBaseline(t, "hibiscus-jpeg", src, 312, 442, jpeg.Decode)
+}
 
-	t.Logf("decode throughput: %.2f MB/s, %d ns/op", throughputMB, nsPerOp)
+func TestBenchmarkWEBPHibiscusRegularBaselineRecord(t *testing.T) {
+	src := loadBenchFixture(t, "m/hibiscus.regular.lossless.webp")
+	recordDecodeBaseline(t, "hibiscus-webp", src, 312, 442, webp.Decode)
+}
 
-	// --- stdlib comparison ---
-	start2 := time.Now()
-	for i := 0; i < iterations; i++ {
-		if _, err := png.Decode(bytes.NewReader(pngSrc)); err != nil {
-			t.Fatalf("stdlib png.Decode iteration %d: %v", i, err)
-		}
-	}
-	elapsed2 := time.Since(start2)
+func TestBenchmarkGIFHibiscusRegularBaselineRecord(t *testing.T) {
+	src := loadBenchFixture(t, "m/hibiscus.regular.gif")
+	recordDecodeBaseline(t, "hibiscus-gif", src, 312, 442, gif.Decode)
+}
 
-	nsPerOp2 := elapsed2.Nanoseconds() / iterations
-	throughputMB2 := float64(len(pngSrc)) * float64(iterations) / elapsed2.Seconds() / (1024 * 1024)
+func TestBenchmarkJPEGHarvestersBaselineRecord(t *testing.T) {
+	src := loadBenchFixture(t, "l/harvesters.jpeg")
+	recordDecodeBaseline(t, "harvesters-jpeg", src, 1165, 859, jpeg.Decode)
+}
 
-	t.Logf("stdlib decode throughput: %.2f MB/s, %d ns/op", throughputMB2, nsPerOp2)
-	t.Logf("comparison harvesters: wuffs-go %.2f MB/s (%d ns/op) vs stdlib %.2f MB/s (%d ns/op)",
-		throughputMB, nsPerOp, throughputMB2, nsPerOp2)
+func TestBenchmarkWEBPHarvestersLosslessBaselineRecord(t *testing.T) {
+	src := loadBenchFixture(t, "l/harvesters.lossless.webp")
+	recordDecodeBaseline(t, "harvesters-webp-lossless", src, 1165, 859, webp.Decode)
+}
 
-	if meta == nil {
-		t.Fatal("DecodeRGBA returned nil Meta")
-	}
+func TestBenchmarkWEBPHarvestersLossyBaselineRecord(t *testing.T) {
+	src := loadBenchFixture(t, "l/harvesters.lossy.webp")
+	recordDecodeBaseline(t, "harvesters-webp-lossy", src, 1165, 859, webp.Decode)
+}
+
+func TestBenchmarkGIFHarvestersBaselineRecord(t *testing.T) {
+	src := loadBenchFixture(t, "l/harvesters.gif")
+	recordDecodeBaseline(t, "harvesters-gif", src, 1165, 859, gif.Decode)
 }
 
 // TestIntegrationProbe_PNG verifies that Probe reports the PNG image

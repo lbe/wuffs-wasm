@@ -24,3 +24,7 @@ wasm/build/
 .env
 
 tmp/
+
+# BENCH-02 benchmark fixtures (downloaded; never commit)
+testdata/bench/m/
+testdata/bench/l/

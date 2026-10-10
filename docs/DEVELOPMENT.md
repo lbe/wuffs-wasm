@@ -4,23 +4,64 @@ This document explains how to build, test, and hack on `wuffs-go`.
 
 ## Performance comparison
 
-Wuffs-go PNG benchmarks are paired with `image/png` stdlib benchmarks so
-throughput can be compared on the same machine. All use the same compressed
-input bytes for an apples-to-apples source-throughput comparison.
+Wuffs-go benchmarks are paired with stdlib benchmarks on the same compressed
+bytes. **Compare ms/op first**; MB/s in record-test logs is secondary.
+
+M/L fixtures live under gitignored `testdata/bench/m/` and `testdata/bench/l/`.
+Download them before benches or local record tests:
+
+```bash
+make bench-fixtures   # network required; not run in CI
+```
+
+CI skips M/L `TestBenchmark*BaselineRecord` tests when fixtures are absent.
+S-tier record tests (committed `testdata/`) still run in CI. M/L benchmarks
+call `requireBenchFixtures` and fail when those fixtures are absent; CI does
+not download them.
 
 ```bash
 # Run all four PNG benchmarks (2 wuffs + 2 stdlib).
 go test -bench='PNG_' -benchmem -count=5 -run=^$
 
-# Run the baseline record test (logs both wuffs and stdlib throughput).
+# L-tier PNG record test (requires make bench-fixtures).
 go test -v -run TestBenchmarkPNGBaselineRecord -count=1
+
+# M/L record tests (skipped in CI without fixtures).
+go test -v -run 'TestBenchmark.*(Hibiscus|Harvesters)BaselineRecord' -count=1 .
 ```
+
+WebP, GIF, and JPEG follow the same pattern on fixed fixtures, each paired
+with its stdlib counterpart on the same bytes:
+
+| Format | Fixture                                                                   | Wuffs bench                              | Stdlib bench                                                         |
+| ------ | ------------------------------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
+| WebP   | `testdata/bricks-color.lossless.webp` (160x120, lossless only)            | `BenchmarkDecodeRGBA_WEBP_BricksColor`   | `BenchmarkStdlibWEBP_BricksColor` (`golang.org/x/image/webp.Decode`) |
+| GIF    | `testdata/bricks-nodither.gif` (160x120, single frame, `DecodeRGBA` only) | `BenchmarkDecodeRGBA_GIF_BricksNodither` | `BenchmarkStdlibGIF_BricksNodither` (`image/gif.Decode`)             |
+| JPEG   | `testdata/hat.jpeg` (90x112)                                              | `BenchmarkDecodeRGBA_JPEG_Hat`           | `BenchmarkStdlibJPEG_Hat` (`image/jpeg.Decode`)                      |
+
+```bash
+# Run all six WebP/GIF/JPEG benchmarks (3 wuffs + 3 stdlib).
+go test -bench='DecodeRGBA_(WEBP|GIF|JPEG)_|Stdlib(WEBP|GIF|JPEG)_' -benchmem -count=5 -run=^$
+
+# M/L benches (requires make bench-fixtures).
+go test -bench='HibiscusRegular|Harvesters' -benchmem -count=5 -run=^$ .
+
+# Run one combined pass over every decode benchmark (PNG + WebP + GIF + JPEG).
+go test -bench='PNG_|DecodeRGBA_(WEBP|GIF|JPEG)_|Stdlib(WEBP|GIF|JPEG)_' -benchmem -count=5 -run=^$
+
+# Run the WebP/GIF/JPEG record tests (each logs wuffs + stdlib throughput).
+go test -v -run '^TestBenchmark(WEBP|GIF|JPEG)BaselineRecord$' -count=1 .
+```
+
+The WebP stdlib baseline uses `golang.org/x/image/webp` in test code only;
+the product package has no WebP dependency.
 
 **Interpreting output:**
 
-- `BenchmarkStdlibPNG_*` uses `image/png.Decode` — more allocs (full decode
-  allocation), but well-optimized native code.
-- `BenchmarkDecodeRGBA_PNG_*` uses the wuffs wasm guest via wasm2go —
+- `BenchmarkStdlib*` uses the matching stdlib decoder (`image/png.Decode`,
+  `webp.Decode`, `image/gif.Decode`, `image/jpeg.Decode`) — more allocs (full
+  decode allocation per iteration), but well-optimized native code.
+- `BenchmarkDecodeRGBA_*` uses the wuffs wasm guest via wasm2go —
   zero allocs on the hot path (the `image.RGBA` and guest scratch are
   allocated **once** outside `b.ResetTimer` and reused for every iteration),
   but wasm execution overhead remains.
