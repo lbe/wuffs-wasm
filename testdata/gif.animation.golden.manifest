@@ -1,7 +1,8 @@
 # Animation golden manifest. Each line records the CRC-32 (IEEE)
-# of the full-canvas straight RGBA bytes in the caller's image.RGBA
+# of the full-canvas premultiplied RGBA bytes in the caller's image.RGBA
 # Pix after DecodeFrame(dst, src, index) on a fresh zeroed canvas
-# sized from Probe geometry. Format: "<file> <index> <crc32-hex>".
+# sized from Probe geometry (guest RGBA_PREMUL + host row copy).
+# Format: "<file> <index> <crc32-hex>".
 muybridge.gif 0 95FC00D3
 muybridge.gif 1 AC08AC4D
 muybridge.gif 2 CBABF610

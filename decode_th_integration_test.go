@@ -31,11 +31,11 @@ var thMagic = []byte{0xC3, 0xBE, 0xFE}
 // evidence come from testdata/th.golden.manifest, which records each vendored
 // upstream cooked ThumbHash fixture's reported dimensions, its variant
 // properties (has_alpha, l_count, is_landscape), and the CRC-32 (IEEE) of its
-// decoded straight RGBA pixels. Those CRCs were computed by an independent C
-// oracle program against the upstream Wuffs v0.4 release C library (the exact
-// decoder embedded in the wasm guest) using the guest's decode parameters,
-// and validated against the canonical upstream thumbhash C test's final-pixel
-// value 0xFF56632E for 3OcRJYB4d3h_iIeHeEh3eIhw-j3A.th.
+// decoded premultiplied RGBA pixels. Those CRCs were computed by decoding each
+// fixture with this package's DecodeRGBA (guest RGBA_PREMUL + host row copy
+// into the caller's image.RGBA Pix), and validated against the canonical
+// upstream thumbhash C test's final-pixel value 0xFF56632E for
+// 3OcRJYB4d3h_iIeHeEh3eIhw-j3A.th.
 //
 //   - Every manifest fixture probes as FormatTH with exact Wuffs-derived
 //     dimensions (always no greater than 32x32), stride = Width*4, and
@@ -329,7 +329,7 @@ type thFixture struct {
 	file        string
 	width       int
 	height      int
-	crc         uint32 // CRC-32 (IEEE) of the decoded straight RGBA pixels
+	crc         uint32 // CRC-32 (IEEE) of the decoded premultiplied RGBA pixels
 	hasAlpha    int    // 1 when the payload carries 14 A AC coefficients
 	lCount      int    // 3..=7, the encoded L AC coefficient count selector
 	isLandscape int    // 1 when width and height dimension codes are swapped

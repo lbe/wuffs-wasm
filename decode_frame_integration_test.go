@@ -15,7 +15,7 @@ import (
 // animatedFrame1DeltaCRC is the CRC32-IEEE of the Frame.Bounds
 // sub-rectangle (derived from Frame.Bounds at runtime) of frame 1 of
 // testdata/animated-red-blue.gif decoded with a fresh zeroed canvas: the
-// indexed frame's own (delta) pixels in straight RGBA row-major bytes,
+// indexed frame's own (delta) pixels in premultiplied RGBA row-major bytes,
 // not a composed canvas. Pinned from the delta-at-Bounds GREEN run; guest
 // reports Duration 200ms, DisposalNone, Overwrite false, canvas 64x48.
 const animatedFrame1DeltaCRC uint32 = 0xA1BFE543
@@ -168,7 +168,7 @@ func TestIntegrationDecodeFrameCore(t *testing.T) {
 			t.Errorf("Frame.Bounds = %v not inside canvas %v", frame.Bounds, full)
 		}
 
-		// CRC over straight-RGBA row-major bytes strictly inside Bounds.
+		// CRC over premultiplied-RGBA row-major bytes strictly inside Bounds.
 		b := frame.Bounds
 		var raw []byte
 		for y := b.Min.Y; y < b.Max.Y; y++ {

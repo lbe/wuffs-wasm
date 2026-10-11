@@ -8,96 +8,36 @@ func unpremultiply(c, a uint8) uint8 {
 	return uint8((uint16(c) * 255) / uint16(a))
 }
 
-// convertBGRAToStraight copies width*height decoded BGRA-premultiplied pixels
-// from src into dst, writing straight (non-premultiplied) RGBA/NRGBA bytes in
-// Go image order.
-//
-// For each pixel it swaps the B and R channels and straightens the alpha:
-//   - a == 0: all channels are set to zero (fully transparent).
-//   - a == 255: channels are copied through unchanged (fully opaque).
-//   - otherwise: R, G, B are unpremultiplied via integer division (c*255)/a.
-//
-// dstStride is the number of bytes per row in dst (may differ from width*4).
-// The source stride is always width*4 bytes.
-func convertBGRAToStraight(dst []byte, dstStride int, src []byte, width, height int) {
-	srcStride := width * 4
-	for y := 0; y < height; y++ {
-		s := y * srcStride
-		d := y * dstStride
-		for x := 0; x < width; x++ {
-			si := s + x*4
-			di := d + x*4
-			b := src[si+0]
-			g := src[si+1]
-			r := src[si+2]
-			a := src[si+3]
-			switch a {
-			case 0:
-				dst[di+0] = 0
-				dst[di+1] = 0
-				dst[di+2] = 0
-				dst[di+3] = 0
-			case 255:
-				dst[di+0] = r
-				dst[di+1] = g
-				dst[di+2] = b
-				dst[di+3] = 255
-			default:
-				dst[di+0] = unpremultiply(r, a)
-				dst[di+1] = unpremultiply(g, a)
-				dst[di+2] = unpremultiply(b, a)
-				dst[di+3] = a
-			}
-		}
-	}
-}
-
-// convertBGRAToRGBARegion copies the Frame.Bounds sub-rectangle of a decoded
-// full-canvas BGRA-premultiplied scratch image into dst, producing straight
-// (non-premultiplied) RGBA in Go image order. Only pixels inside bounds are
-// written; pixels outside bounds in dst are untouched.
+// copyScratchToRGBARegion copies the Frame.Bounds sub-rectangle of a decoded
+// full-canvas RGBA-premultiplied scratch image into dst. The guest emits RGBA
+// byte order, so each row is a plain copy with no channel swap. Only pixels
+// inside bounds are written; pixels outside bounds in dst are untouched.
 //
 // bounds is the frame rectangle inside the overall width*height canvas
 // (half-open, canvas coordinates). dstStride is the number of bytes per row
 // in dst (may differ from canvas width*4). The source stride is always
 // canvas width*4 bytes.
-func convertBGRAToRGBARegion(dst []byte, dstStride int, src []byte, canvasWidth int, bounds image.Rectangle) {
+func copyScratchToRGBARegion(dst []byte, dstStride int, src []byte, canvasWidth int, bounds image.Rectangle) {
 	srcStride := canvasWidth * 4
+	rowLen := bounds.Dx() * 4
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		s := y*srcStride + bounds.Min.X*4
 		d := y*dstStride + bounds.Min.X*4
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			si := s + (x-bounds.Min.X)*4
-			di := d + (x-bounds.Min.X)*4
-			b := src[si+0]
-			g := src[si+1]
-			r := src[si+2]
-			a := src[si+3]
-			switch a {
-			case 0:
-				dst[di+0] = 0
-				dst[di+1] = 0
-				dst[di+2] = 0
-				dst[di+3] = 0
-			case 255:
-				dst[di+0] = r
-				dst[di+1] = g
-				dst[di+2] = b
-				dst[di+3] = 255
-			default:
-				dst[di+0] = unpremultiply(r, a)
-				dst[di+1] = unpremultiply(g, a)
-				dst[di+2] = unpremultiply(b, a)
-				dst[di+3] = a
-			}
-		}
+		copy(dst[d:d+rowLen], src[s:s+rowLen])
 	}
 }
 
-// convertBGRAToNRGBA copies width*height decoded BGRA pixels from src into
-// dst, producing straight (non-premultiplied) NRGBA in Go image order.
-func convertBGRAToNRGBA(dst []byte, dstStride int, src []byte, width, height int) {
-	convertBGRAToStraight(dst, dstStride, src, width, height)
+// copyScratchToNRGBA copies width*height decoded RGBA-non-premultiplied
+// pixels from src into dst. The guest emits RGBA byte order, so each row is
+// a plain copy with no channel swap.
+func copyScratchToNRGBA(dst []byte, dstStride int, src []byte, width, height int) {
+	srcStride := width * 4
+	rowLen := width * 4
+	for y := 0; y < height; y++ {
+		s := y * srcStride
+		d := y * dstStride
+		copy(dst[d:d+rowLen], src[s:s+rowLen])
+	}
 }
 
 // convertBGRAToGray copies width*height decoded BGRA-premultiplied pixels from

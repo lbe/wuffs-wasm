@@ -18,7 +18,7 @@ import (
 
 // nieFrameZeroCanonicalCRC is the animated-red-blue.nia frame-zero CRC from
 // the existing testdata/nie.golden.manifest (nia-bn4 line): the full-canvas
-// straight RGBA CRC that frame-zero decode must keep matching.
+// premultiplied RGBA CRC that frame-zero decode must keep matching.
 const nieFrameZeroCanonicalCRC = 4230696731
 
 // TestIntegrationNIEAnimationCharacterization verifies NIE nïA multi-frame

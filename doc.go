@@ -6,8 +6,9 @@
 // The reusable hot path is Probe → Reserve → DecodeRGBA (or DecodeNRGBA /
 // DecodeGray) into a pre-allocated image.Image destination. Decode methods
 // write into the caller's Pix slice; they never allocate, replace, or alias
-// Pix to wasm memory. Guest dst scratch is internal; only explicit Reserve
-// grows wasm linear memory.
+// Pix to wasm memory. DecodeRGBA and DecodeFrame emit alpha-premultiplied
+// image.RGBA bytes; DecodeNRGBA emits straight NRGBA bytes. Guest dst scratch
+// is internal; only explicit Reserve grows wasm linear memory.
 //
 // # Source capacity
 //

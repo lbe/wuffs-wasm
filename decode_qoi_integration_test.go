@@ -16,9 +16,9 @@ import (
 //     colorspace) probes and decodes as FormatQOI with the expected geometry,
 //     and DecodeRGBA output is pixel-identical to the existing bricks-color.png
 //     oracle while preserving the caller-owned destination layout.
-//   - The in-repository alpha-pixels.qoi fixture (RGBA mode, 3×1, straight
-//     non-premultiplied pixels) decodes to exact fixed pixels: opaque,
-//     translucent, and fully transparent.
+//   - The in-repository alpha-pixels.qoi fixture (RGBA mode, 3×1)
+//     decodes to the premultiplied pixels of the pixel-identical PNG
+//     oracle (png.Decode composited into image.NewRGBA with draw.Src).
 //   - A deterministic truncation of the bricks-color.qoi pixel stream (the
 //     corrupt QOI) still probes as 160×120 FormatQOI, but DecodeRGBA fails
 //     with errors.Is(err, ErrDecode) (and not ErrUnknownFormat), leaving a
@@ -110,7 +110,7 @@ func TestIntegrationQOIDecodeCharacterization(t *testing.T) {
 		}
 	})
 
-	t.Run("in-repository RGBA alpha-pixels.qoi decodes to fixed straight pixels", func(t *testing.T) {
+	t.Run("in-repository RGBA alpha-pixels.qoi decodes to premultiplied pixels", func(t *testing.T) {
 		d := wuffs.New()
 		if err := wuffs.RequiredReserve(d, 3*1*4, len(alphaSrc)); err != nil {
 			t.Fatalf("RequiredReserve: %v", err)
@@ -154,15 +154,12 @@ func TestIntegrationQOIDecodeCharacterization(t *testing.T) {
 			t.Errorf("DecodeRGBA BytesWritten = %d, want %d", decMeta.BytesWritten, 3*1*4)
 		}
 
-		// Straight (non-premultiplied) RGBA: identical values to the
-		// alpha-pixels.png NRGBA fixture: opaque, translucent, transparent.
-		wantPixels := []byte{
-			0x12, 0x34, 0x56, 0xFF,
-			0xFF, 0x00, 0xFF, 0x80,
-			0x00, 0x00, 0x00, 0x00,
-		}
-		if !bytes.Equal(dst.Pix, wantPixels) {
-			t.Errorf("DecodeRGBA(alpha-pixels.qoi) pixels = % X, want % X", dst.Pix, wantPixels)
+		// Premultiplied pixels per the Oracle rule: png.Decode of the
+		// pixel-identical PNG composited into image.NewRGBA with draw.Src.
+		pngSrc := loadFixture(t, "alpha-pixels.png")
+		want := stdlibPremulRGBA(t, pngSrc)
+		if !bytes.Equal(dst.Pix, want.Pix) {
+			t.Errorf("DecodeRGBA(alpha-pixels.qoi) pixels = % X, want % X", dst.Pix, want.Pix)
 		}
 	})
 

@@ -22,9 +22,9 @@ const etc2FourCC = uint32(0x45544332) // "ETC2"
 // contract end-to-end against the live wasm guest. The fixtures and their
 // canonical evidence come from testdata/etc2.golden.manifest, which records
 // each vendored upstream PKM fixture's reported dimensions, its PKM variant,
-// and the CRC-32 (IEEE) of its decoded straight RGBA pixels as produced by
-// the upstream Wuffs decoder (the same wuffs-v0.4.c embedded in the guest
-// wasm, using the guest's own BGRA_PREMUL/blend-SRC decode parameters):
+// and the CRC-32 (IEEE) of its decoded premultiplied RGBA pixels as produced
+// by this package's DecodeRGBA (guest RGBA_PREMUL + host row copy into the
+// caller's image.RGBA Pix):
 //
 //   - Every manifest fixture probes as FormatETC2 with exact dimensions,
 //     stride = Width*4, and BytesWritten 0.
@@ -251,7 +251,7 @@ type etc2Fixture struct {
 	file   string
 	width  int
 	height int
-	crc    uint32 // CRC-32 (IEEE) of the decoded straight RGBA pixels
+	crc    uint32 // CRC-32 (IEEE) of the decoded premultiplied RGBA pixels
 }
 
 // loadETC2Manifest parses testdata/etc2.golden.manifest with an explicit

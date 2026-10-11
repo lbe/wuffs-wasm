@@ -42,6 +42,43 @@ enum {
   WUFFS_WASM_ERR_BAD_ARG = -4,
 };
 
+enum {
+  WUFFS_WASM_DST_PIXFMT_RGBA_PREMUL = 1,
+  WUFFS_WASM_DST_PIXFMT_RGBA_NONPREMUL = 2,
+  WUFFS_WASM_DST_PIXFMT_BGRA_PREMUL = 3,
+};
+
+// Maps a dst_pixfmt code to a Wuffs pixel format value. Returns 0 for any
+// unknown code; callers translate 0 into WUFFS_WASM_ERR_BAD_ARG.
+static uint32_t dst_pixfmt_to_format(int32_t dst_pixfmt) {
+  switch (dst_pixfmt) {
+    case WUFFS_WASM_DST_PIXFMT_RGBA_PREMUL:
+      return WUFFS_BASE__PIXEL_FORMAT__RGBA_PREMUL;
+    case WUFFS_WASM_DST_PIXFMT_RGBA_NONPREMUL:
+      return WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL;
+    case WUFFS_WASM_DST_PIXFMT_BGRA_PREMUL:
+      return WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL;
+    default:
+      return 0;
+  }
+}
+
+// Applies dst_pixfmt to pixcfg, preserving its width and height. Returns 1
+// on success, 0 when dst_pixfmt is unknown (pixcfg untouched).
+static int apply_dst_pixfmt(wuffs_base__pixel_config* pixcfg,
+                            int32_t dst_pixfmt) {
+  uint32_t fmt = dst_pixfmt_to_format(dst_pixfmt);
+  if (fmt == 0) {
+    return 0;
+  }
+  wuffs_base__pixel_format pixfmt = wuffs_base__make_pixel_format(fmt);
+  wuffs_base__pixel_config__set(
+      pixcfg, pixfmt.repr, WUFFS_BASE__PIXEL_SUBSAMPLING__NONE,
+      wuffs_base__pixel_config__width(pixcfg),
+      wuffs_base__pixel_config__height(pixcfg));
+  return 1;
+}
+
 static uint8_t* mem_ptr(uint32_t off) { return (uint8_t*)(uintptr_t)off; }
 
 // TGA has no reliable magic bytes, so the fallback is a conservative parse of
@@ -338,7 +375,8 @@ static const wuffs_wasm_decoder_slot* find_decoder(uint32_t fourcc) {
 }
 
 static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off,
-                            uint32_t dst_cap, uint32_t meta_off) {
+                            uint32_t dst_cap, uint32_t meta_off,
+                            int32_t dst_pixfmt) {
   if (src_len == 0 || meta_off == 0) {
     return WUFFS_WASM_ERR_BAD_ARG;
   }
@@ -393,12 +431,10 @@ static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off
     return WUFFS_WASM_ERR_DECODE;
   }
 
-  wuffs_base__pixel_format pixfmt =
-      wuffs_base__make_pixel_format(WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL);
-  wuffs_base__pixel_config__set(
-      &ic.pixcfg, pixfmt.repr, WUFFS_BASE__PIXEL_SUBSAMPLING__NONE,
-      wuffs_base__pixel_config__width(&ic.pixcfg),
-      wuffs_base__pixel_config__height(&ic.pixcfg));
+  if (!apply_dst_pixfmt(&ic.pixcfg, dst_pixfmt)) {
+    meta->err = WUFFS_WASM_ERR_BAD_ARG;
+    return WUFFS_WASM_ERR_BAD_ARG;
+  }
 
   uint32_t width = wuffs_base__pixel_config__width(&ic.pixcfg);
   uint32_t height = wuffs_base__pixel_config__height(&ic.pixcfg);
@@ -708,7 +744,7 @@ typedef struct wuffs_wasm_frame_meta {
 static int32_t decode_frame(uint32_t src_off, uint32_t src_len,
                             uint32_t dst_off, uint32_t dst_cap,
                             uint32_t decode_meta_off, uint32_t frame_meta_off,
-                            int32_t index) {
+                            int32_t index, int32_t dst_pixfmt) {
   if (src_len == 0 || decode_meta_off == 0 || frame_meta_off == 0 ||
       index < 0) {
     wuffs_wasm_decode_meta* dm =
@@ -779,12 +815,11 @@ static int32_t decode_frame(uint32_t src_off, uint32_t src_len,
     return WUFFS_WASM_ERR_DECODE;
   }
 
-  wuffs_base__pixel_format pixfmt =
-      wuffs_base__make_pixel_format(WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL);
-  wuffs_base__pixel_config__set(
-      &ic.pixcfg, pixfmt.repr, WUFFS_BASE__PIXEL_SUBSAMPLING__NONE,
-      wuffs_base__pixel_config__width(&ic.pixcfg),
-      wuffs_base__pixel_config__height(&ic.pixcfg));
+  if (!apply_dst_pixfmt(&ic.pixcfg, dst_pixfmt)) {
+    dec_meta->err = WUFFS_WASM_ERR_BAD_ARG;
+    frame_meta->err = WUFFS_WASM_ERR_BAD_ARG;
+    return WUFFS_WASM_ERR_BAD_ARG;
+  }
 
   uint32_t width = wuffs_base__pixel_config__width(&ic.pixcfg);
   uint32_t height = wuffs_base__pixel_config__height(&ic.pixcfg);
@@ -884,9 +919,10 @@ static int32_t decode_frame(uint32_t src_off, uint32_t src_len,
 __attribute__((export_name("wuffs_decode_frame"))) int32_t
 wuffs_wasm_decode_frame(uint32_t src_off, uint32_t src_len, uint32_t dst_off,
                          uint32_t dst_cap, uint32_t decode_meta_off,
-                         uint32_t frame_meta_off, int32_t index) {
+                         uint32_t frame_meta_off, int32_t index,
+                         int32_t dst_pixfmt) {
   return decode_frame(src_off, src_len, dst_off, dst_cap, decode_meta_off,
-                       frame_meta_off, index);
+                       frame_meta_off, index, dst_pixfmt);
 }
 
 // wuffs_wasm_metadata_pack_header — written by read_image_metadata at
@@ -1231,6 +1267,6 @@ __attribute__((export_name("wuffs_version"))) uint32_t wuffs_wasm_version(void) 
 
 __attribute__((export_name("wuffs_decode_image"))) int32_t wuffs_wasm_decode_image(
     uint32_t src_off, uint32_t src_len, uint32_t dst_off, uint32_t dst_cap,
-    uint32_t meta_off) {
-  return decode_image(src_off, src_len, dst_off, dst_cap, meta_off);
+    uint32_t meta_off, int32_t dst_pixfmt) {
+  return decode_image(src_off, src_len, dst_off, dst_cap, meta_off, dst_pixfmt);
 }

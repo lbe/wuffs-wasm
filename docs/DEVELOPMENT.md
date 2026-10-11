@@ -154,9 +154,13 @@ make format                     # apply formatting via treefmt
   See README for usage; `docs/package-capability-conversation.md` is the
   design conversation that set that order.
 - `wasm/shim.c` exports `wuffs_probe_image` (sniff + image config, no
-  pixels), `wuffs_decode_image` (full frame), `wuffs_frame_count`,
-  `wuffs_animation_loops`, `wuffs_decode_frame`, and
-  `wuffs_read_image_metadata` (metadata-only walk, no pixels). Changing any
+  pixels), `wuffs_decode_image(src_off, src_len, dst_off, dst_cap, meta_off,
+  dst_pixfmt)` (full frame), `wuffs_frame_count`,
+  `wuffs_animation_loops`, `wuffs_decode_frame(src_off, src_len, dst_off,
+  dst_cap, decode_meta_off, frame_meta_off, index, dst_pixfmt)`, and
+  `wuffs_read_image_metadata` (metadata-only walk, no pixels). `dst_pixfmt`
+  is 1=RGBA_PREMUL, 2=RGBA_NONPREMUL, 3=BGRA_PREMUL; any other value returns
+  `WUFFS_WASM_ERR_BAD_ARG`. Changing any
   export requires `make generate`.
 - The guest writes a `metadata pack` (header + EXIF/ICC/XMP blobs) into
   guest dst scratch, and the host parses it and copies blobs to Go heap.

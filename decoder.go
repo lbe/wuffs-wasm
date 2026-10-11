@@ -32,6 +32,15 @@ type Decoder struct {
 	lastMetadata  Metadata // reused Metadata return value; blob slices are replaced each successful call
 }
 
+// Guest destination pixel format codes for wuffs_decode_image and
+// wuffs_decode_frame (mirrored in wasm/shim.c). Passed as the last export
+// argument: 1=RGBA_PREMUL, 2=RGBA_NONPREMUL, 3=BGRA_PREMUL.
+const (
+	guestDstPixfmtRGBAPremul    int32 = 1
+	guestDstPixfmtRGBANonPremul int32 = 2
+	guestDstPixfmtBGRAPremul    int32 = 3
+)
+
 // New constructs a Decoder with default guest scratch: 128 KiB dst slot and
 // 64 KiB src capacity (raise both with Reserve before large inputs).
 func New() *Decoder {
@@ -73,7 +82,8 @@ func (d *Decoder) checkSrcCapacity(src []byte) error {
 	return nil
 }
 
-// DecodeRGBA decodes src (e.g. PNG or WEBP) into the caller-owned dst.
+// DecodeRGBA decodes src (e.g. PNG or WEBP) into the caller-owned dst as
+// alpha-premultiplied image.RGBA pixels (Go image.RGBA semantics).
 //
 // The caller must pre-allocate dst with Rect, Stride, and Pix set to the
 // decoded canvas: Probe for Width x Height (or use known dimensions), Rect.Min
@@ -81,8 +91,9 @@ func (d *Decoder) checkSrcCapacity(src []byte) error {
 //
 // On success pixels are written into the caller's Pix; the library never
 // allocates or replaces Pix and never points Pix at wasm memory. The wasm
-// destination slot is scratch only: the guest decodes BGRA bytes there and the
-// host converts them into dst.Pix.
+// destination slot is scratch only: the guest decodes RGBA premul bytes there
+// (WUFFS_BASE__PIXEL_FORMAT__RGBA_PREMUL) and the host copies each row into
+// dst.Pix.
 //
 // Errors:
 //   - ErrBadImage for a malformed or incompatible destination shape: an empty
@@ -114,8 +125,9 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 //
 // On success pixels are written into the caller's Pix; the library never
 // allocates or replaces Pix and never points Pix at wasm memory. The wasm
-// destination slot is scratch only: the guest decodes BGRA bytes there and
-// the host converts them into straight NRGBA bytes in dst.Pix.
+// destination slot is scratch only: the guest decodes RGBA non-premul bytes
+// there (WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL) and the host copies each
+// full-canvas row into straight NRGBA bytes in dst.Pix.
 //
 // Errors:
 //   - ErrBadImage for a malformed or incompatible destination shape: an empty
@@ -132,13 +144,13 @@ func (d *Decoder) DecodeNRGBA(dst *image.NRGBA, src []byte) (*Meta, error) {
 	if dst == nil {
 		return nil, ErrBadImage
 	}
-	decMeta, wasmBGRA, err := d.decodeImageForDestination(dst.Rect, len(dst.Pix), dst.Stride, 4, src)
+	decMeta, wasmBGRA, err := d.decodeImageForDestination(dst.Rect, len(dst.Pix), dst.Stride, 4, src, guestDstPixfmtRGBANonPremul)
 	if err != nil {
 		return nil, err
 	}
 	width := int(decMeta.Width)
 	height := int(decMeta.Height)
-	convertBGRAToNRGBA(dst.Pix, dst.Stride, wasmBGRA, width, height)
+	copyScratchToNRGBA(dst.Pix, dst.Stride, wasmBGRA, width, height)
 	d.lastMeta = decMeta
 	return &d.lastMeta, nil
 }
@@ -171,7 +183,7 @@ func (d *Decoder) DecodeGray(dst *image.Gray, src []byte) (*Meta, error) {
 	if dst == nil {
 		return nil, ErrBadImage
 	}
-	decMeta, wasmBGRA, err := d.decodeImageForDestination(dst.Rect, len(dst.Pix), dst.Stride, 1, src)
+	decMeta, wasmBGRA, err := d.decodeImageForDestination(dst.Rect, len(dst.Pix), dst.Stride, 1, src, guestDstPixfmtBGRAPremul)
 	if err != nil {
 		return nil, err
 	}
@@ -184,11 +196,11 @@ func (d *Decoder) DecodeGray(dst *image.Gray, src []byte) (*Meta, error) {
 }
 
 // decodeImageForDestination decodes src, validates the caller-owned layout,
-// and returns the decoded metadata with a view of the guest's BGRA scratch
+// and returns the decoded metadata with a view of the guest's scratch
 // pixels. Keeping this sequence in one place ensures all typed destinations
 // apply identical geometry and overflow checks before conversion.
-func (d *Decoder) decodeImageForDestination(rect image.Rectangle, pixLen, stride, bytesPerPixel int, src []byte) (Meta, []byte, error) {
-	lay, decMeta, memBytes, err := d.decodeImage(src)
+func (d *Decoder) decodeImageForDestination(rect image.Rectangle, pixLen, stride, bytesPerPixel int, src []byte, dstPixfmt int32) (Meta, []byte, error) {
+	lay, decMeta, memBytes, err := d.decodeImage(src, dstPixfmt)
 	if err != nil {
 		return Meta{}, nil, err
 	}
@@ -207,7 +219,7 @@ func (d *Decoder) decodeImageForDestination(rect image.Rectangle, pixLen, stride
 // decodeImage performs the guest decode and returns the decoded metadata and
 // live wasm memory view. Destination validation and pixel conversion remain
 // with each concrete decoder method.
-func (d *Decoder) decodeImage(src []byte) (slotLayout, Meta, []byte, error) {
+func (d *Decoder) decodeImage(src []byte, dstPixfmt int32) (slotLayout, Meta, []byte, error) {
 	if err := d.checkSrcCapacity(src); err != nil {
 		return slotLayout{}, Meta{}, nil, err
 	}
@@ -218,6 +230,7 @@ func (d *Decoder) decodeImage(src []byte) (slotLayout, Meta, []byte, error) {
 		int32(lay.srcOff), int32(len(src)),
 		int32(lay.dstOff), int32(lay.dstLen),
 		int32(lay.metaOff),
+		dstPixfmt,
 	)
 	if ret != 0 {
 		err := errFromGuestReturn(ret)
@@ -426,7 +439,8 @@ func readFrameMeta(mem []byte, frameMetaOff uint32) Frame {
 
 // DecodeFrame decodes animation frame `index` (0-based) of src into the
 // caller-owned dst overall canvas (Probe width x height, same Pix contract
-// as DecodeRGBA), writing that frame's own (delta) pixels as straight RGBA
+// as DecodeRGBA), writing that frame's own (delta) pixels as premultiplied
+// RGBA
 // only within Frame.Bounds; pixels outside Bounds are untouched. `index`
 // must satisfy 0 <= index < FrameCount; out of range returns ErrDecode.
 // The caller composites using Frame Disposal, Overwrite, and Background.
@@ -467,6 +481,7 @@ func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, e
 		int32(lay.dstOff), int32(lay.dstLen),
 		int32(lay.metaOff), int32(lay.frameMetaOff),
 		int32(index),
+		guestDstPixfmtRGBAPremul,
 	)
 	if ret != 0 {
 		err := errFromGuestReturn(ret)
@@ -501,7 +516,7 @@ func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, e
 	if err != nil {
 		return nil, err
 	}
-	convertBGRAToRGBARegion(dst.Pix, dst.Stride, wasmBGRA, width, frame.Bounds)
+	copyScratchToRGBARegion(dst.Pix, dst.Stride, wasmBGRA, width, frame.Bounds)
 
 	d.lastMeta = decMeta
 	d.lastFrame = frame

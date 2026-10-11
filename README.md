@@ -127,8 +127,8 @@ Formats outside [Wuffs image decoders](https://github.com/google/wuffs/blob/main
 ### Current limitations
 
 - **Animation** — multi-frame `DecodeFrame` is verified for GIF and NIE nïA; PNG is first-frame-only and WebP is still-only with no animation.
-- **Output** — caller-owned `image.RGBA`, `image.NRGBA`, or `image.Gray`
-  buffers (straight, non-premultiplied color; Gray uses one byte per pixel).
+- **Output** — caller-owned `image.RGBA` (alpha-premultiplied), `image.NRGBA`
+  (straight), or `image.Gray` buffers (Gray uses one byte per pixel).
 - **Metadata** — `(*Decoder).Metadata` is an opt-in EXIF/ICC/XMP/gamma/chromaticities/sRGB/modification-time read that does not decode pixels; it returns the `Metadata` type with a `Chromaticities` value, keyed by `MetaEXIF`, `MetaICCP`, `MetaXMP`, `MetaGAMA`, `MetaCHRM`, `MetaSRGB`, `MetaMTIM`.
 
 ## Install
@@ -171,13 +171,14 @@ func main() {
 	dst := image.NewRGBA(image.Rect(0, 0, int(meta.Width), int(meta.Height)))
 
 	// 3. Reserve grows the guest scratch slots (src + dst) before decode. The
-	//    guest decodes BGRA into its own wasm scratch slot, not into dst.Pix.
+	//    guest decodes into its own wasm scratch slot in the destination pixel
+	//    format (RGBA premul for DecodeRGBA/DecodeFrame), not into dst.Pix.
 	if err := d.Reserve(int(meta.Stride)*int(meta.Height), len(pngSrc)); err != nil {
 		panic(err)
 	}
 
 	// 4. Decode into your buffer. The host reads the wasm scratch slot and
-	//    copies/converts pixels into your caller-owned dst.Pix; dst.Pix is
+	//    copies each row into your caller-owned dst.Pix; dst.Pix is
 	//    never replaced or aliased to wasm memory.
 	meta, err = d.DecodeRGBA(dst, pngSrc)
 	if err != nil {
@@ -195,8 +196,8 @@ Call order: `Probe` first, then create a correctly sized `image.NewRGBA` from
 `len(src)`), then `DecodeRGBA`. Skip `Probe` only if width and height are already
 known.
 
-**Ownership.** The caller owns `dst.Pix`. `DecodeRGBA` writes the converted,
-straight (non-premultiplied) RGBA pixels into that backing array and never
+**Ownership.** The caller owns `dst.Pix`. `DecodeRGBA` writes the
+premultiplied-RGBA pixels (`image.RGBA` semantics) into that backing array and never
 touches the slice header, `Rect`, or `Stride`. The wasm destination slot is
 scratch only; product pixels live in your Go `image.RGBA`, not in wasm memory.
 

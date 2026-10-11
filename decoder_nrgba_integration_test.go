@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"image/png"
 	"testing"
 
 	"github.com/lbe/wuffs-wasm"
@@ -57,13 +58,16 @@ func TestIntegrationDecodeNRGBA(t *testing.T) {
 	if &dst.Pix[0] != pixPtr || len(dst.Pix) != pixLen || cap(dst.Pix) != pixCap || dst.Rect != rect || dst.Stride != dstStride {
 		t.Fatal("DecodeNRGBA changed the caller-owned destination layout")
 	}
-	want := []byte{
-		0x12, 0x34, 0x56, 0xFF,
-		0xFF, 0x00, 0xFF, 0x80,
-		0x00, 0x00, 0x00, 0x00,
+	wantOracle, err := png.Decode(bytes.NewReader(src))
+	if err != nil {
+		t.Fatalf("png.Decode: %v", err)
 	}
-	if got := dst.Pix[:alphaFixtureWidth*4]; !bytes.Equal(got, want) {
-		t.Errorf("DecodeNRGBA pixels = % X, want % X", got, want)
+	oracle, ok := wantOracle.(*image.NRGBA)
+	if !ok {
+		t.Fatalf("png.Decode(alpha-pixels.png) = %T, want *image.NRGBA", wantOracle)
+	}
+	if got := dst.Pix[:alphaFixtureWidth*4]; !bytes.Equal(got, oracle.Pix) {
+		t.Errorf("DecodeNRGBA pixels = % X, want stdlib oracle % X", got, oracle.Pix)
 	}
 	for i, got := range dst.Pix[alphaFixtureWidth*4:] {
 		if got != 0xA5 {

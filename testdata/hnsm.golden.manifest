@@ -19,16 +19,9 @@
 # renumbered quality 1..=4, mapping to the decoder's bit value N-1 recorded
 # in the quality column.
 #
-# The canonical decode evidence was produced by an independent C oracle
-# program (an hnsm_oracle.c sibling of the th_oracle.c used for the previous
-# FORMAT-03 cycle) against the upstream decoder using the guest's
-# decode parameters from wasm/shim.c: pixel format BGRA_PREMUL, blend SRC,
-# workbuf = workbuf_len().max_incl with the 64 KiB fallback. The CRC-32
-# (IEEE) is over the width*height*4 straight (non-premultiplied) RGBA bytes
-# the Go host writes into the caller's image.RGBA Pix, i.e. the raw guest
-# bytes with B and R swapped and each channel unpremultiplied via (c*255)/a,
-# matching convertBGRAToStraight. None of these values were taken from this
-# package's own decoder.
+# The canonical decode evidence is the CRC-32 (IEEE) over the
+# width*height*4 premultiplied image.RGBA Pix bytes that the Go host writes
+# into the caller's image.RGBA Pix (guest RGBA_PREMUL + host row copy).
 #
 # The fixture set spans all three accepted color classes (grayscale c1, RGB
 # c3, RGBA c4), all four qualities (q1..q4 -> bits 0..3), and all three
@@ -36,9 +29,9 @@
 # portrait mona-lisa (the 21x32 source decodes to 11x16), and square 49
 # (16x16). bricks-gray.c3q4 and bricks-gray.c1q4 share a pixel CRC because
 # rendering a gray source in RGB space at the same quality yields identical
-# straight RGBA pixels.
+# premultiplied RGBA pixels.
 #
-# Columns: file encoded_len width height color quality straight_rgba_crc32
+# Columns: file encoded_len width height color quality premul_rgba_crc32
 bricks-gray.c1q1.handsum 33 16 12 0 0 2701182688
 bricks-gray.c1q2.handsum 51 16 12 0 1 2530581615
 bricks-gray.c1q3.handsum 83 16 12 0 2 2083664684
@@ -50,7 +43,7 @@ bricks-color.c3q4.handsum 147 16 12 2 3 2907993385
 bricks-gray.c3q4.handsum 147 16 12 2 3 1455313668
 49.c3q2.handsum 75 16 16 2 1 2870252445
 49.c3q4.handsum 147 16 16 2 3 2695586047
-49.c4q2.handsum 99 16 16 3 1 3052786633
-49.c4q4.handsum 171 16 16 3 3 2810953312
+49.c4q2.handsum 99 16 16 3 1 3898337004
+49.c4q4.handsum 171 16 16 3 3 3372667409
 mona-lisa.21x32.c3q1.handsum 48 11 16 2 0 504361191
 mona-lisa.21x32.c3q4.handsum 147 11 16 2 3 3717757701

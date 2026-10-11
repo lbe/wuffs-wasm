@@ -2,7 +2,10 @@
 
 **Status (2026):** The `DecodeRGBA` caller-owned `Pix` correction and the rest
 of the `API.md` roadmap (still destinations, convenience APIs, formats,
-registration, animation, metadata) are **implemented**. For current usage read
+registration, animation, metadata) are **implemented**. DecodeRGBA and
+DecodeFrame emit alpha-premultiplied `image.RGBA` bytes: the guest decodes
+`RGBA_PREMUL` scratch for RGBA paths (`RGBA_NONPREMUL` for NRGBA) and the
+host row-copies into caller-owned `Pix`. No API shape change. For current usage read
 `README.md` and `API.md`; this file is retained as historical context for the
 original aliasing failure.
 

@@ -159,14 +159,11 @@ func TestIntegrationDecodeAllocatesTightRGBA(t *testing.T) {
 			t.Errorf("img.Stride = %d, want %d", img.Stride, wantStride)
 		}
 
-		// Expected pixel bytes matching the NRGBA integration test pattern.
-		wantPixels := []byte{
-			0x12, 0x34, 0x56, 0xFF, // opaque pixel
-			0xFF, 0x00, 0xFF, 0x80, // translucent pixel
-			0x00, 0x00, 0x00, 0x00, // fully transparent pixel
-		}
-		if !bytes.Equal(img.Pix[:alphaW*4], wantPixels) {
-			t.Errorf("img.Pix = % X, want % X", img.Pix[:alphaW*4], wantPixels)
+		// Premultiplied pixels per the Oracle rule: png.Decode composited
+		// into image.NewRGBA with draw.Src.
+		want := stdlibPremulRGBA(t, alphaSrc)
+		if !bytes.Equal(img.Pix, want.Pix) {
+			t.Errorf("img.Pix = % X, want % X", img.Pix, want.Pix)
 		}
 	})
 

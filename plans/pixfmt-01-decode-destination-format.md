@@ -51,11 +51,11 @@ Go references:
 
 ## Target behavior (fixed)
 
-| Host API | Guest `pixel_config` (Wuffs) | Host transfer |
-| -------- | ------------------------------ | ------------- |
-| `DecodeRGBA`, `DecodeFrame` | `WUFFS_BASE__PIXEL_FORMAT__RGBA_PREMUL` | `copy` each row from scratch sub-rectangle into `dst.Pix` |
-| `DecodeNRGBA` | `WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL` | `copy` each full-canvas row into `dst.Pix` |
-| `DecodeGray` | `WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL` | existing `convertBGRAToGray` (unpremul only inside gray kernel) |
+| Host API                    | Guest `pixel_config` (Wuffs)               | Host transfer                                                   |
+| --------------------------- | ------------------------------------------ | --------------------------------------------------------------- |
+| `DecodeRGBA`, `DecodeFrame` | `WUFFS_BASE__PIXEL_FORMAT__RGBA_PREMUL`    | `copy` each row from scratch sub-rectangle into `dst.Pix`       |
+| `DecodeNRGBA`               | `WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL` | `copy` each full-canvas row into `dst.Pix`                      |
+| `DecodeGray`                | `WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL`    | existing `convertBGRAToGray` (unpremul only inside gray kernel) |
 
 Remove `convertBGRAToRGBARegion`, `convertBGRAToStraight`, and
 `convertBGRAToNRGBA` from the RGBA/NRGBA decode paths. Delete dead helpers when
@@ -82,11 +82,11 @@ Add `int32_t dst_pixfmt` as the **last** parameter on:
 
 Numeric codes (defined in `wasm/shim.c`; mirrored as `const` in `decoder.go`):
 
-| Code | Constant name (Go + C) | Wuffs format |
-| ---- | ---------------------- | ------------ |
-| `1` | `guestDstPixfmtRGBAPremul` | `WUFFS_BASE__PIXEL_FORMAT__RGBA_PREMUL` |
-| `2` | `guestDstPixfmtRGBANonPremul` | `WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL` |
-| `3` | `guestDstPixfmtBGRAPremul` | `WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL` |
+| Code | Constant name (Go + C)        | Wuffs format                               |
+| ---- | ----------------------------- | ------------------------------------------ |
+| `1`  | `guestDstPixfmtRGBAPremul`    | `WUFFS_BASE__PIXEL_FORMAT__RGBA_PREMUL`    |
+| `2`  | `guestDstPixfmtRGBANonPremul` | `WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL` |
+| `3`  | `guestDstPixfmtBGRAPremul`    | `WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL`    |
 
 Any other value → `WUFFS_WASM_ERR_BAD_ARG` on both meta slots (`decode_frame`)
 or meta (`decode_image`).
@@ -131,17 +131,17 @@ Add `TestUnpremultiplyGrayTable` in `convert_test.go`: exhaustive `a` in
 
 Executors **must not** edit this plan file. On any trigger below (or any global rule): **STOP**, message the user (task id, evidence), **no commit**, **no next task** until written user direction.
 
-| # | Trigger |
-| - | ------- |
-| 1 | Hand-edit `internal/wuffswasm/wuffs.go` |
-| 2 | `make generate` on a task that does not authorize it |
-| 3 | Skip or weaken a failing correctness test to force green |
-| 4 | Change outside the current task allowed-file list |
+| # | Trigger                                                                                      |
+| - | -------------------------------------------------------------------------------------------- |
+| 1 | Hand-edit `internal/wuffswasm/wuffs.go`                                                      |
+| 2 | `make generate` on a task that does not authorize it                                         |
+| 3 | Skip or weaken a failing correctness test to force green                                     |
+| 4 | Change outside the current task allowed-file list                                            |
 | 5 | Wuffs build fails: `RGBA_PREMUL` / `RGBA_NONPREMUL` not in allowlist or unknown at link time |
-| 6 | `git add` under `testdata/bench/m/` or `testdata/bench/l/` |
-| 7 | Copy fixtures from `../wuffs/` or any local checkout |
-| 8 | `png.Decode` of `testdata/alpha-pixels.png` is not `*image.NRGBA` |
-| 9 | Task 6 profile step: `make bench-fixtures` not run and L-tier PNG missing |
+| 6 | `git add` under `testdata/bench/m/` or `testdata/bench/l/`                                   |
+| 7 | Copy fixtures from `../wuffs/` or any local checkout                                         |
+| 8 | `png.Decode` of `testdata/alpha-pixels.png` is not `*image.NRGBA`                            |
+| 9 | Task 6 profile step: `make bench-fixtures` not run and L-tier PNG missing                    |
 
 ---
 

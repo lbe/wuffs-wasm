@@ -27,11 +27,9 @@ const hnsmFourCC = uint32(0x484E534D)
 // each vendored upstream handsum fixture's encoded length, decoded
 // dimensions, its variant fields (color class and quality bit values decoded
 // from the fixture's own header), and the CRC-32 (IEEE) of its decoded
-// straight RGBA pixels. Those CRCs were computed by an independent C oracle
-// program (tmp/hnsm_oracle.c) against the upstream Wuffs v0.4 release C
-// library (the exact decoder embedded in the wasm guest) using the guest's
-// decode parameters, and then transformed with the host's own
-// convertBGRAToStraight B/R swap and unpremultiply rules.
+// premultiplied RGBA pixels. Those CRCs were computed by decoding each
+// fixture with this package's DecodeRGBA (guest RGBA_PREMUL + host row copy
+// into the caller's image.RGBA Pix).
 //
 //   - Every manifest fixture probes as FormatHNSM with exact Wuffs-derived
 //     dimensions (always one dimension of 16 and the other from 1 through
@@ -331,7 +329,7 @@ type hnsmFixture struct {
 	height  int    // decoded height
 	color   int    // 0=grayscale, 2=RGB, 3=RGBA (1 is rejected)
 	quality int    // 0=worst .. 3=best
-	crc     uint32 // CRC-32 (IEEE) of the decoded straight RGBA pixels
+	crc     uint32 // CRC-32 (IEEE) of the decoded premultiplied RGBA pixels
 }
 
 // loadHNSMManifest parses testdata/hnsm.golden.manifest with an explicit

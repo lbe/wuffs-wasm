@@ -247,8 +247,16 @@ Contract for all three:
   `Reserve`, or decode on this `Decoder` must not change those bytes.
 - Empty `Rect` or nil/empty `Pix` is an error (`ErrBadImage` or
   `*DstTooSmallError`), not a cue to invent a buffer.
-- Output is straight (non-premultiplied) color. Guest scratch is BGRA premul
-  for RGBA/NRGBA; converted into `dst.Pix`.
+- `DecodeRGBA` / `DecodeFrame` write alpha-premultiplied `image.RGBA` bytes into
+  `dst.Pix` (Go `image.RGBA` semantics: premultiplied R, G, B, A). Guest scratch
+  uses `WUFFS_BASE__PIXEL_FORMAT__RGBA_PREMUL`; the host transfers pixels with
+  a stride-aware row `copy` (no channel swap, no unpremultiply).
+- `DecodeNRGBA` writes straight (non-premultiplied) NRGBA bytes into `dst.Pix`
+  (Go `image.NRGBA` semantics). Guest scratch uses
+  `WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL`; the host transfers full-canvas
+  rows with `copy`.
+- `DecodeGray` keeps guest `WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL` scratch with
+  the existing gray conversion kernel.
 - `DecodeRGBA` is frame 0 of an animation. Overall canvas size, not the first
   frame’s dirty rect, unless they coincide.
 

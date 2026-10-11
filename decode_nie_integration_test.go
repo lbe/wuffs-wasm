@@ -37,7 +37,7 @@ var (
 // Format) frame-zero contract end-to-end against the live wasm guest. The fixtures and
 // their canonical evidence come from testdata/nie.golden.manifest, which
 // records each vendored upstream fixture's reported dimensions, its wire
-// pixel encoding, and the CRC-32 (IEEE) of its frame-zero straight RGBA
+// pixel encoding, and the CRC-32 (IEEE) of its frame-zero premultiplied RGBA
 // pixels independently derived from the NIE specification and the Wuffs v0.4
 // pixel-swizzler arithmetic:
 //
@@ -47,7 +47,7 @@ var (
 //   - Every manifest fixture decodes frame zero to the manifest's canonical
 //     CRC-32 AND to the independently derived per-pixel RGBA bytes, with the
 //     caller-owned destination layout preserved. The still fixtures cover
-//     BGRA non-premultiplied and premultiplied pixels at 8 and 16 bits per
+//     BGRA non-premultiplied and premultiplied wire pixels at 8 and 16 bits per
 //     channel (bn4, bn8, bp4, bp8); the nïA container's frame zero is
 //     additionally covered by the ANIM-01 nïA multi-frame characterization
 //     (TestIntegrationNIEAnimationCharacterization), which decodes all four
@@ -101,7 +101,7 @@ func TestIntegrationNIEDecodeCharacterization(t *testing.T) {
 				dst := image.NewRGBA(image.Rect(0, 0, fc.width, fc.height))
 				assertNIEDecodeRGBA(t, d, fc.file, dst, src, uint32(fc.width), uint32(fc.height))
 
-				want, _, _ := nieFrameZeroStraightRGBA(t, src)
+				want, _, _ := nieFrameZeroPremulRGBA(t, src)
 				if !bytes.Equal(dst.Pix, want) {
 					t.Errorf("DecodeRGBA(%s, %s) pixels differ from the independently derived RGBA oracle (first mismatch at byte %d)", fc.file, fc.encoding, firstMismatch(dst.Pix, want))
 				}
@@ -302,7 +302,7 @@ type nieFixture struct {
 	width    int
 	height   int
 	encoding string
-	crc      uint32 // CRC-32 (IEEE) of the frame-zero straight RGBA pixels
+	crc      uint32 // CRC-32 (IEEE) of the frame-zero premultiplied RGBA pixels
 }
 
 // loadNIEManifest parses testdata/nie.golden.manifest with an explicit
@@ -354,7 +354,7 @@ func loadNIEManifest(t *testing.T) []nieFixture {
 	return fixtures
 }
 
-// nieFrameZeroStraightRGBA derives frame-zero straight RGBA bytes from a
+// nieFrameZeroPremulRGBA derives frame-zero premultiplied RGBA bytes from a
 // complete NIE still (nïE) or NIA container (nïA) independently of the wasm
 // decoder, per ../wuffs/doc/spec/nie-spec.md:
 //
@@ -364,7 +364,7 @@ func loadNIEManifest(t *testing.T) []nieFixture {
 //  2. for a nïA container, frame zero starts after the 8-byte cumulative
 //     display duration and the inner NIE header, whose config and dimensions
 //     must equal the outer header's;
-//  3. each wire pixel is converted into the guest's BGRA_PREMUL destination
+//  3. each wire pixel is converted into the guest's RGBA_PREMUL destination
 //     bytes with the exact Wuffs v0.4 swizzler arithmetic
 //     (wuffs-mirror-release-c/release/c/wuffs-v0.4.c): bn4 uses
 //     color_u32_argb_nonpremul__as__color_u32_argb_premul (a*0x101*0x101,
@@ -372,13 +372,13 @@ func loadNIEManifest(t *testing.T) []nieFixture {
 //     color_u64_argb_nonpremul__as__color_u32_argb_premul
 //     ((c16*a16)/0xFFFF, high byte out), bp4 copies, bp8 takes each 16-bit
 //     channel's high byte via color_u64__as__color_u32;
-//  4. finally the BGRA-PREMUL slot bytes become straight RGBA in Go image
-//     order exactly like the host's documented convertBGRAToStraight: B/R
-//     swap, and unpremultiply (c*255)/a for translucent alpha.
+//  4. the RGBA_PREMUL slot bytes are written in R,G,B,A order with a host row
+//     copy, matching DecodeRGBA/DecodeFrame output (alpha-premultiplied
+//     image.RGBA Pix).
 //
 // The returned slice is width*height*4 bytes and the caller receives the
 // derived width and height.
-func nieFrameZeroStraightRGBA(t *testing.T, src []byte) ([]byte, int, int) {
+func nieFrameZeroPremulRGBA(t *testing.T, src []byte) ([]byte, int, int) {
 	t.Helper()
 	if len(src) < 16 {
 		t.Fatalf("NIE oracle: source is only %d bytes, want a 16-byte header", len(src))
@@ -417,66 +417,54 @@ func nieFrameZeroStraightRGBA(t *testing.T, src []byte) ([]byte, int, int) {
 	out := make([]byte, w*h*4)
 	oi := 0
 	for i := 0; i < len(px); {
-		var b, g, r, a uint8
+		var r, g, b, a uint8
 		switch config {
 		case "\xffbn4":
-			b, g, r, a = premul8(px[i+0], px[i+1], px[i+2], px[i+3])
+			r, g, b, a = premul8(px[i+0], px[i+1], px[i+2], px[i+3])
 			i += 4
 		case "\xffbn8":
 			b16 := binary.LittleEndian.Uint16(px[i+0:])
 			g16 := binary.LittleEndian.Uint16(px[i+2:])
 			r16 := binary.LittleEndian.Uint16(px[i+4:])
 			a16 := binary.LittleEndian.Uint16(px[i+6:])
-			b, g, r, a = premul16(b16, g16, r16, a16)
+			r, g, b, a = premul16(b16, g16, r16, a16)
 			i += 8
 		case "\xffbp4":
-			b, g, r, a = px[i+0], px[i+1], px[i+2], px[i+3]
+			r, g, b, a = px[i+2], px[i+1], px[i+0], px[i+3]
 			i += 4
 		case "\xffbp8":
-			b, g, r, a = px[i+1], px[i+3], px[i+5], px[i+7]
+			r, g, b, a = px[i+5], px[i+3], px[i+1], px[i+7]
 			i += 8
 		default:
 			t.Fatalf("NIE oracle: unsupported configuration %q", config)
 		}
-		switch a {
-		case 0:
-			out[oi+0], out[oi+1], out[oi+2], out[oi+3] = 0, 0, 0, 0
-		case 255:
-			out[oi+0], out[oi+1], out[oi+2], out[oi+3] = r, g, b, 255
-		default:
-			out[oi+0], out[oi+1], out[oi+2], out[oi+3] = unpremul8(r, a), unpremul8(g, a), unpremul8(b, a), a
-		}
+		out[oi+0], out[oi+1], out[oi+2], out[oi+3] = r, g, b, a
 		oi += 4
 	}
 	return out, w, h
 }
 
-// premul8 converts one 8-bit non-premultiplied pixel to premultiplied bytes
-// per the Wuffs v0.4 color_u32_argb_nonpremul__as__color_u32_argb_premul
-// arithmetic: a16 = a*0x101*0x101 and each channel is ((c*a16)/0xFFFF)>>8.
+// premul8 converts one 8-bit non-premultiplied pixel to premultiplied RGBA
+// bytes in R,G,B,A order per the Wuffs v0.4
+// color_u32_argb_nonpremul__as__color_u32_argb_premul arithmetic: a16 =
+// a*0x101*0x101 and each channel is ((c*a16)/0xFFFF)>>8.
 func premul8(b, g, r, a uint8) (uint8, uint8, uint8, uint8) {
 	a16 := uint32(a) * 0x101 * 0x101
 	pR := uint8(((uint32(r) * a16) / 0xFFFF) >> 8)
 	pG := uint8(((uint32(g) * a16) / 0xFFFF) >> 8)
 	pB := uint8(((uint32(b) * a16) / 0xFFFF) >> 8)
-	return pB, pG, pR, a
+	return pR, pG, pB, a
 }
 
 // premul16 converts one 16-bit non-premultiplied pixel to premultiplied
-// 8-bit bytes per the Wuffs v0.4
+// RGBA 8-bit bytes in R,G,B,A order per the Wuffs v0.4
 // color_u64_argb_nonpremul__as__color_u32_argb_premul arithmetic: each
 // channel is ((c16*a16)/0xFFFF)>>8 and alpha is a16>>8.
 func premul16(b16, g16, r16, a16 uint16) (uint8, uint8, uint8, uint8) {
 	r := uint16((uint32(r16) * uint32(a16)) / 0xFFFF)
 	g := uint16((uint32(g16) * uint32(a16)) / 0xFFFF)
 	b := uint16((uint32(b16) * uint32(a16)) / 0xFFFF)
-	return uint8(b >> 8), uint8(g >> 8), uint8(r >> 8), uint8(a16 >> 8)
-}
-
-// unpremul8 converts one premultiplied channel to straight per the host's
-// documented convertBGRAToStraight: (c*255)/a.
-func unpremul8(c, a uint8) uint8 {
-	return uint8((uint16(c) * 255) / uint16(a))
+	return uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), uint8(a16 >> 8)
 }
 
 // replaceBytes returns a copy of src with src[index] replaced by value.

@@ -3,6 +3,8 @@ package wuffs_test
 import (
 	"bytes"
 	"errors"
+	"image"
+	"image/png"
 	"testing"
 	"unsafe"
 
@@ -140,15 +142,18 @@ func TestIntegrationDecodeNRGBAAllocatesTight(t *testing.T) {
 			t.Errorf("img.Stride = %d, want %d", img.Stride, wantStride)
 		}
 
-		// Expected pixel bytes matching the NRGBA decoder integration test
-		// pattern: straight (non-premultiplied) color and alpha.
-		wantPixels := []byte{
-			0x12, 0x34, 0x56, 0xFF, // opaque pixel
-			0xFF, 0x00, 0xFF, 0x80, // translucent pixel
-			0x00, 0x00, 0x00, 0x00, // fully transparent pixel
+		// Oracle rule: stdlib png.Decode must yield *image.NRGBA; compare
+		// DecodeNRGBA output Pix to the oracle Pix (tight stride).
+		wantOracle, err := png.Decode(bytes.NewReader(alphaSrc))
+		if err != nil {
+			t.Fatalf("png.Decode: %v", err)
 		}
-		if !bytes.Equal(img.Pix[:alphaW*4], wantPixels) {
-			t.Errorf("img.Pix = % X, want % X", img.Pix[:alphaW*4], wantPixels)
+		oracle, ok := wantOracle.(*image.NRGBA)
+		if !ok {
+			t.Fatalf("png.Decode(alpha-pixels.png) = %T, want *image.NRGBA", wantOracle)
+		}
+		if !bytes.Equal(img.Pix[:alphaW*4], oracle.Pix) {
+			t.Errorf("img.Pix = % X, want stdlib oracle % X", img.Pix[:alphaW*4], oracle.Pix)
 		}
 	})
 
