@@ -9,6 +9,33 @@ via `.pi/`). That is why it is hard to find.
 
 ---
 
+## Status (Oct 2026)
+
+Implemented. `API.md` is the current contract; `README.md` is usage.
+`HANDOVER.md` records the wasm-aliasing failure that delayed caller-owned
+`Pix` — not a remaining gap.
+
+Landed:
+
+- No CGO. Image decode only. Consumer API in the root package; generated
+  bindings in `internal/wuffswasm/wuffs.go`.
+- Caller-owned `Pix` / `Rect` / `Stride` on `DecodeRGBA`, `DecodeNRGBA`,
+  `DecodeGray`, and `DecodeFrame`. Decode never allocates, replaces, or
+  aliases `Pix` to wasm.
+- Explicit `Reserve`. `Probe` and decode do not auto-grow guest memory.
+- Zero Go heap allocs on repeated decode after `Reserve` into a sized
+  destination.
+- One `Decoder` per goroutine; concurrent callers use separate instances.
+- Thirteen verified Wuffs image formats; opt-in `RegisterFormats`.
+
+Pixel semantics were corrected after the 17 Aug grilling (PIXFMT-01):
+`DecodeRGBA` / `DecodeFrame` emit alpha-premultiplied `image.RGBA` bytes;
+`DecodeNRGBA` emits straight NRGBA. Guest scratch is `RGBA_PREMUL` /
+`RGBA_NONPREMUL` with a host row copy, not BGRA-premul converted to
+straight RGBA.
+
+---
+
 ## 17 Aug 2026 — product constraints
 
 - CGO is not an option. Image codecs only.
@@ -36,6 +63,9 @@ goal:
   already sized (`AllocsPerRun` after `Reserve`).
 - Guest memory grows via `Reserve`, not a fixed megapixel cap.
 
+The BGRA → straight RGBA conversion in that restatement was later replaced by
+PIXFMT-01 (see Status). The caller-owned `Pix` contract was not.
+
 ---
 
 ## 22–23 Aug 2026 — package scope
@@ -55,5 +85,4 @@ goal:
 - “The whole fucking goal of creating wuffs-wasm is to populate an existing
   image.RGBA and not have to reallocate it every fucking decode.”
 
-That is the 17 Aug `Pix` contract in one sentence. The repo still does not do
-it. See `HANDOVER.md`.
+That is the 17 Aug `Pix` contract in one sentence. It is implemented.

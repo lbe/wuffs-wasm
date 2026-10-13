@@ -371,7 +371,9 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for benchmark interpretation and 
 To rebuild the wasm guest or regenerate `internal/wuffswasm/wuffs.go`, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Consumers only need `go get`; the generated bindings are committed in the repository.
 
 ```bash
-make test
+make test      # no fuzz tag
+make test-all  # -tags fuzz (includes Fuzz* seeds)
+make fuzz      # Fuzz* mutation only
 ```
 
 ## License

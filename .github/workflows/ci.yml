@@ -39,6 +39,9 @@ jobs:
       - name: Run tests (coverage)
         run: make cover
 
+      - name: Run tests with race detector
+        run: make test-race
+
       - name: Upload coverage (Codecov)
         uses: codecov/codecov-action@v7
         with:

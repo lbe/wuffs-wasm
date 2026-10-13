@@ -135,12 +135,39 @@ make generate                   # depends on wasm, runs:
                                 #     wasm/wuffs.wasm
 
 # Run the test suite.
-make test                       # default package is ./...
-make test-race                  # race detector, scoped to root package
+make test                       # no fuzz tag
+make test-all                   # -tags fuzz (Test* and Fuzz* seeds)
+make test-race                  # no fuzz tag
+make fuzz                       # -tags fuzz, mutation only (`-run=^$`)
 make lint                       # golangci-lint
 make format-check               # check formatting without writing
 make format                     # apply formatting via treefmt
 ```
+
+## Fuzzing
+
+Native `Fuzz*` tests hunt host bugs (panic, wasm out-of-bounds, `Pix`
+aliasing, implicit `memory.Grow`, non-public errors), not Wuffs decoder
+defects. `fuzz_test.go` is gated with `//go:build fuzz`.
+
+`make test`, `make test-race`, and `make cover` omit that tag, so `Fuzz*` is
+not compiled. Seed-only `Fuzz*` runs under `make test-all` (`-tags fuzz`).
+Mutation is `make fuzz` only (`-tags fuzz -run=^$`, no Test*). It uses
+`-parallel=4` because each iteration calls `wuffs.New()` (wasm guest);
+unbounded workers OOM this host.
+
+```bash
+make fuzz                                   # FuzzDecodeRGBA, 30s, -parallel=4
+make fuzz FUZZ=FuzzDecodeFrame FUZZTIME=2m
+```
+
+Targets: `FuzzDecodeRGBA`, `FuzzDecodeGray`, `FuzzDecodeFrame`,
+`FuzzMetadata`. Caps: no `Reserve`; src stays within 64 KiB; decode is
+skipped above 32768 pixels; mutation is four workers.
+
+Generated corpus lands in `testdata/fuzz/` and is gitignored. Do not commit
+it. A crash is a product bug: keep the failing input, do not weaken the
+fuzzer.
 
 ## Module layout
 

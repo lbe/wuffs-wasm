@@ -3,6 +3,11 @@
 M/L benchmark inputs are **not** stored here; see `testdata/bench/README.md`
 and run `make bench-fixtures` from the repo root.
 
+## Fuzz corpus
+
+The generated native fuzz corpus (`testdata/fuzz/`, written by
+`go test -fuzz`) is gitignored. Do not vendor it.
+
 ## Committed S-tier fixtures
 
 Vendored test fixtures from the Wuffs project.

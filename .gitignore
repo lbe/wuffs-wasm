@@ -28,3 +28,6 @@ tmp/
 # BENCH-02 benchmark fixtures (downloaded; never commit)
 testdata/bench/m/
 testdata/bench/l/
+
+# FUZZ-01 generated Go fuzz corpus (never commit)
+testdata/fuzz/
