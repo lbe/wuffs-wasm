@@ -17,6 +17,24 @@ func TestUnitMemoryLayout(t *testing.T) {
 	t.Run("slot layout at New", func(t *testing.T) {
 		layout := d.currentLayout
 
+		// A new decoder starts with exactly 32 MiB of guest linear memory
+		// from the generated module.
+		memSize := uint32(len(*d.module.Xmemory().Slice()))
+		if memSize != 32*1024*1024 {
+			t.Errorf("guest linear memory = %d bytes, want exactly %d (32 MiB)", memSize, 32*1024*1024)
+		}
+
+		// Default slots must end within that 32 MiB memory.
+		slotEnd := layout.dstOff + layout.dstLen
+		if uint64(slotEnd) > uint64(memSize) {
+			t.Errorf("default slot end = %d, exceeds guest linear memory %d", slotEnd, memSize)
+		}
+
+		// Host slots begin at the 24 MiB floor.
+		if hostSlotRegionBase != 0x01800000 {
+			t.Errorf("hostSlotRegionBase = 0x%X, want 0x01800000 (24 MiB)", hostSlotRegionBase)
+		}
+
 		// meta slot offset must be non-zero (guest rejects meta_off==0)
 		if layout.metaOff == 0 {
 			t.Error("meta slot offset must be non-zero (guest rejects meta_off==0)")
@@ -27,9 +45,9 @@ func TestUnitMemoryLayout(t *testing.T) {
 			t.Error("meta slot size must be non-zero")
 		}
 
-		// host slot region base >= 0x2000000
-		if layout.hostBase < 0x2000000 {
-			t.Errorf("host slot region base = 0x%X, want >= 0x2000000", layout.hostBase)
+		// Host slots begin at or above the 24 MiB floor.
+		if layout.hostBase < 0x01800000 {
+			t.Errorf("host slot region base = 0x%X, want >= 0x01800000 (24 MiB)", layout.hostBase)
 		}
 
 		// Slots must not overlap
@@ -72,11 +90,17 @@ func TestUnitMemoryLayout(t *testing.T) {
 		oldSrcOff := layout.srcOff
 		oldDstOff := layout.dstOff
 
-		// Reserve with large values to trigger memory.Grow.
-		// wasm initial memory is 64MiB; this request requires growth.
+		// Reserve with large values to trigger memory.Grow. The generated
+		// 32 MiB baseline cannot hold a 32 MiB dst slot plus a 2 MiB src
+		// slot above the 24 MiB floor, so this request grows memory.
+		beforeBytes := uint32(len(*d.module.Xmemory().Slice()))
 		err := d.Reserve(32*1024*1024, 2*1024*1024)
 		if err != nil {
 			t.Fatalf("Reserve(32MiB, 2MiB) failed: %v", err)
+		}
+		afterBytes := uint32(len(*d.module.Xmemory().Slice()))
+		if afterBytes <= beforeBytes {
+			t.Errorf("Reserve did not grow guest linear memory: before %d, after %d", beforeBytes, afterBytes)
 		}
 
 		layout = d.currentLayout

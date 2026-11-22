@@ -98,7 +98,9 @@ func TestIntegrationQOIDecodeCharacterization(t *testing.T) {
 		// Oracle: the same canvas decoded from the pixel-identical PNG fixture.
 		oracle := image.NewRGBA(image.Rect(0, 0, wantWidth, wantHeight))
 		pngSrc := loadFixture(t, "bricks-color.png")
-		if _, err := wuffs.New().DecodeRGBA(oracle, pngSrc); err != nil {
+		oracleDecoder := wuffs.New()
+		reserveForDecode(t, oracleDecoder, pngSrc)
+		if _, err := oracleDecoder.DecodeRGBA(oracle, pngSrc); err != nil {
 			t.Fatalf("PNG oracle DecodeRGBA: %v", err)
 		}
 		if !bytes.Equal(dst.Pix, oracle.Pix) {

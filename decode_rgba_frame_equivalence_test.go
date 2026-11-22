@@ -39,7 +39,7 @@ func TestIntegrationDecodeRGBAFrameZeroEquivalence(t *testing.T) {
 				t.Fatalf("Probe(%s) Meta = %+v, want non-zero dimensions", file, probe)
 			}
 			w, h := int(probe.Width), int(probe.Height)
-			if reserveErr := d.Reserve(int(probe.Stride)*h, len(src)); reserveErr != nil {
+			if reserveErr := d.Reserve(int(probe.Stride)*h+int(probe.WorkbufLen), len(src)); reserveErr != nil {
 				t.Fatalf("Reserve(%s) error = %v, want nil", file, reserveErr)
 			}
 

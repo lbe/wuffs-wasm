@@ -7,8 +7,13 @@
 // DecodeGray) into a pre-allocated image.Image destination. Decode methods
 // write into the caller's Pix slice; they never allocate, replace, or alias
 // Pix to wasm memory. DecodeRGBA and DecodeFrame emit alpha-premultiplied
-// image.RGBA bytes; DecodeNRGBA emits straight NRGBA bytes. Guest dst scratch
-// is internal; only explicit Reserve grows wasm linear memory.
+// image.RGBA bytes; DecodeNRGBA emits straight NRGBA bytes. A successful
+// DecodeNRGBA or DecodeGray call populates its entire decoded canvas and
+// retains no pixels from an earlier use of the Decoder. Guest dst scratch
+// is internal. New starts with 32 MiB of guest linear memory; only explicit
+// Reserve grows it, up to the 256 MiB generated maximum. Decoding needs
+// Stride*Height + WorkbufLen bytes of guest dst scratch, both reported by
+// Probe.
 //
 // # Source capacity
 //
@@ -20,7 +25,9 @@
 //
 // FrameCount, LoopCount, and DecodeFrame expose multi-frame GIF and verified
 // NIE nïA animation. DecodeRGBA is equivalent to DecodeFrame(dst, src, 0)
-// without returning frame metadata.
+// without returning frame metadata. Frame.Duration converts Wuffs
+// flicks to time.Duration, truncated to whole nanoseconds; DecodeFrame
+// returns ErrDecode for a duration outside time.Duration.
 //
 // # Metadata
 //
@@ -45,7 +52,8 @@
 // # Concurrency
 //
 // A Decoder is used by one goroutine at a time. Use separate Decoder values
-// (or external serialization) for concurrent callers.
+// (or external serialization) for concurrent callers; a Decoder remains
+// single-goroutine.
 //
 // The authoritative public contract is API.md; README.md shows typical usage.
 package wuffs

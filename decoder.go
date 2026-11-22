@@ -238,7 +238,7 @@ func (d *Decoder) decodeImage(src []byte, dstPixfmt int32) (slotLayout, Meta, []
 			decMeta := readMeta(*d.module.Xmemory().Slice(), lay.metaOff)
 			var dts *DstTooSmallError
 			if errors.As(err, &dts) {
-				dts.MinBytes = decMeta.Stride * decMeta.Height
+				dts.MinBytes = guestDstBytes(decMeta)
 				dts.Width = decMeta.Width
 				dts.Height = decMeta.Height
 				dts.Stride = decMeta.Stride
@@ -415,26 +415,51 @@ func (d *Decoder) LoopCount(src []byte) (uint32, error) {
 // duration_flicks uint64 [24], io_position uint64 [32], disposal [40],
 // overwrite [41], opaque [42], bg_r [43], bg_g [44], bg_b [45], bg_a [46]
 // (byte 47 is padding). An all-zero slot (short read) yields a zero Frame.
-func readFrameMeta(mem []byte, frameMetaOff uint32) Frame {
+// It returns ErrDecode when duration_flicks does not fit time.Duration.
+func readFrameMeta(mem []byte, frameMetaOff uint32) (Frame, error) {
 	if uint64(frameMetaOff)+frameMetaSlotBytes > uint64(len(mem)) {
-		return Frame{}
+		return Frame{}, nil
 	}
 	slot := mem[frameMetaOff : frameMetaOff+frameMetaSlotBytes]
 	minX := int32(binary.LittleEndian.Uint32(slot[8:12]))
 	minY := int32(binary.LittleEndian.Uint32(slot[12:16]))
 	maxX := int32(binary.LittleEndian.Uint32(slot[16:20]))
 	maxY := int32(binary.LittleEndian.Uint32(slot[20:24]))
-	flicks := binary.LittleEndian.Uint64(slot[24:32])
+	duration, err := flicksToDuration(binary.LittleEndian.Uint64(slot[24:32]))
+	if err != nil {
+		return Frame{}, err
+	}
 	return Frame{
 		Index:      int(binary.LittleEndian.Uint32(slot[4:8])),
 		Bounds:     image.Rect(int(minX), int(minY), int(maxX), int(maxY)),
-		Duration:   time.Duration(flicks) * time.Second / 705600000,
+		Duration:   duration,
 		Disposal:   Disposal(slot[40]),
 		Opaque:     slot[42] == 1,
 		Overwrite:  slot[41] == 1,
 		Background: color.RGBA{R: slot[43], G: slot[44], B: slot[45], A: slot[46]},
 		IOPosition: binary.LittleEndian.Uint64(slot[32:40]),
+	}, nil
+}
+
+// flicksPerSecond is the Wuffs flick rate: 1 flick = 1/705_600_000 s.
+const flicksPerSecond = 705_600_000
+
+// flicksToDuration converts a Wuffs flick count to a time.Duration, truncating
+// to whole nanoseconds. Whole seconds and the sub-second remainder convert
+// separately so no intermediate product overflows. It returns ErrDecode when
+// the result exceeds math.MaxInt64 nanoseconds.
+func flicksToDuration(flicks uint64) (time.Duration, error) {
+	secs := flicks / flicksPerSecond
+	// rem < flicksPerSecond, so rem*1e9 < 7.1e17 fits uint64.
+	remNanos := flicks % flicksPerSecond * uint64(time.Second) / flicksPerSecond
+	if secs > math.MaxInt64/uint64(time.Second) {
+		return 0, ErrDecode
 	}
+	total := secs*uint64(time.Second) + remNanos
+	if total > math.MaxInt64 {
+		return 0, ErrDecode
+	}
+	return time.Duration(total), nil
 }
 
 // DecodeFrame decodes animation frame `index` (0-based) of src into the
@@ -446,7 +471,10 @@ func readFrameMeta(mem []byte, frameMetaOff uint32) Frame {
 // The caller composites using Frame Disposal, Overwrite, and Background.
 // dst validation, src-capacity checks, and guest error mapping match
 // DecodeRGBA, including *DstTooSmallError (matching ErrDstTooSmall) when
-// the guest dst slot is undersized. DecodeRGBA(dst, src) is
+// the guest dst slot is undersized. Frame.Duration converts Wuffs flicks to
+// whole nanoseconds (truncating); a duration outside time.Duration returns
+// ErrDecode before any pixels are copied or lastMeta and lastFrame change.
+// DecodeRGBA(dst, src) is
 // DecodeFrame(dst, src, 0) ignoring the *Frame. On success the reusable
 // lastMeta is populated from the decode meta (same fields as DecodeRGBA)
 // and the returned *Frame aliases the reusable lastFrame. DecodeFrame
@@ -490,7 +518,7 @@ func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, e
 			decMeta := readMeta(memBytes, lay.metaOff)
 			var dts *DstTooSmallError
 			if errors.As(err, &dts) {
-				dts.MinBytes = decMeta.Stride * decMeta.Height
+				dts.MinBytes = guestDstBytes(decMeta)
 				dts.Width = decMeta.Width
 				dts.Height = decMeta.Height
 				dts.Stride = decMeta.Stride
@@ -507,7 +535,10 @@ func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, e
 	if validationErr := validateDestination(dst.Rect, len(dst.Pix), dst.Stride, width, height, 4); validationErr != nil {
 		return nil, validationErr
 	}
-	frame := readFrameMeta(memBytes, lay.frameMetaOff)
+	frame, err := readFrameMeta(memBytes, lay.frameMetaOff)
+	if err != nil {
+		return nil, err
+	}
 	if frame.Bounds.Empty() || frame.Bounds.Min.X < 0 || frame.Bounds.Min.Y < 0 ||
 		frame.Bounds.Max.X > width || frame.Bounds.Max.Y > height {
 		return nil, ErrDecode

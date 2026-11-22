@@ -21,8 +21,8 @@ const (
 	// before callers raise it via Reserve.
 	defaultSrcCap = 64 * 1024 // 64 KiB
 	// metaSlotBytes is the size of the metadata slot in bytes.
-	// Matches the C wuffs_wasm_decode_meta struct (6 × uint32 = 24 bytes).
-	metaSlotBytes = 24
+	// Matches the C wuffs_wasm_decode_meta struct (7 × uint32 = 28 bytes).
+	metaSlotBytes = 28
 
 	// frameCountOutSlotBytes is the size of the frame-count out slot in
 	// bytes. Matches the int32 written by wuffs_frame_count.
@@ -44,8 +44,11 @@ const (
 
 	// hostSlotRegionBase is the minimum base offset in wasm linear memory
 	// where host-accessible slots begin. Guest code rejects meta_off == 0,
-	// so this must be non-zero and sufficiently large.
-	hostSlotRegionBase = 0x2000000 // 32 MiB
+	// so this must be non-zero. It sits at the 24 MiB guest-allocation floor:
+	// the generated module starts with 32 MiB of linear memory and the first
+	// 24 MiB stays reserved for guest static data, stack, and growth headroom,
+	// leaving the top 8 MiB for the default host slots.
+	hostSlotRegionBase = 0x01800000 // 24 MiB
 
 	// wasmPageSize is the wasm linear memory page size in bytes.
 	wasmPageSize = 64 * 1024 // 64 KiB

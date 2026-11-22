@@ -70,7 +70,7 @@ meta, err := d.Probe(src)
 if err != nil {
 	panic(err)
 }
-if err := d.Reserve(int(meta.Stride)*int(meta.Height), len(src)); err != nil {
+if err := d.Reserve(int(meta.Stride)*int(meta.Height)+int(meta.WorkbufLen), len(src)); err != nil {
 	panic(err)
 }
 n, err := d.FrameCount(src)
@@ -173,7 +173,9 @@ func main() {
 	// 3. Reserve grows the guest scratch slots (src + dst) before decode. The
 	//    guest decodes into its own wasm scratch slot in the destination pixel
 	//    format (RGBA premul for DecodeRGBA/DecodeFrame), not into dst.Pix.
-	if err := d.Reserve(int(meta.Stride)*int(meta.Height), len(pngSrc)); err != nil {
+	//    The dst slot holds the decoded canvas plus the Wuffs work buffer, so
+	//    reserve Stride*Height + WorkbufLen.
+	if err := d.Reserve(int(meta.Stride)*int(meta.Height)+int(meta.WorkbufLen), len(pngSrc)); err != nil {
 		panic(err)
 	}
 
@@ -331,13 +333,13 @@ cfg, err := image.DecodeConfig(f)
 | `Probe(src)`                                                                                                                                                                         | Sniff format and dimensions without decoding pixels (allocates a temporary Decoder).                                                                                                                                                    |
 | `(*Decoder) Probe(src)`                                                                                                                                                              | Dimensions and format without decoding pixels on a reusable Decoder; returns `*Meta`.                                                                                                                                                   |
 | `(*Decoder) DecodeRGBA(dst, src)`                                                                                                                                                    | Decode a supported image into `dst`; returns `*Meta` on success.                                                                                                                                                                        |
-| `(*Decoder) DecodeNRGBA(dst, src)` / `DecodeGray(dst, src)`                                                                                                                          | Same ownership contract as `DecodeRGBA` for `*image.NRGBA` or `*image.Gray`.                                                                                                                                                            |
+| `(*Decoder) DecodeNRGBA(dst, src)` / `DecodeGray(dst, src)`                                                                                                                          | Same ownership contract as `DecodeRGBA` for `*image.NRGBA` or `*image.Gray`; populates the entire decoded canvas.                                                                                                                       |
 | `(*Decoder) FrameCount(src)` / `LoopCount(src)`                                                                                                                                      | Animation frame count and loop count (still images: 1 frame, loop 0).                                                                                                                                                                   |
 | `(*Decoder) DecodeFrame(dst, src, index)`                                                                                                                                            | Decode one animation frame into the overall canvas; returns `*Frame`.                                                                                                                                                                   |
 | `(*Decoder) Metadata(src)`                                                                                                                                                           | Opt-in EXIF/ICC/XMP/gamma/chromaticities/sRGB/modification time; no pixels.                                                                                                                                                             |
 | `(*Decoder) Reserve(dstBytes, srcBytes)`                                                                                                                                             | Grow wasm src/dst slots before Probe, decode, animation, or metadata.                                                                                                                                                                   |
 | `(*Decoder) Version()` / `VersionNum()`                                                                                                                                              | Embedded Wuffs library version.                                                                                                                                                                                                         |
-| `Frame`, `Disposal`                                                                                                                                                                  | Per-frame bounds, duration, disposal, blend, and background for `DecodeFrame`.                                                                                                                                                          |
+| `Frame`, `Disposal`                                                                                                                                                                  | Per-frame bounds, duration, disposal, blend, and background for `DecodeFrame`. Duration is truncated to whole nanoseconds; one outside `time.Duration` makes `DecodeFrame` return `ErrDecode`.                                          |
 | `Metadata`, `Chromaticities`                                                                                                                                                         | Metadata payload and parsed chromaticities from `Metadata`.                                                                                                                                                                             |
 | `MetaEXIF` … `MetaMTIM`                                                                                                                                                              | Metadata kind FourCC constants (`MetaEXIF`, `MetaICCP`, `MetaXMP`, `MetaGAMA`, `MetaCHRM`, `MetaSRGB`, `MetaMTIM`).                                                                                                                     |
 | `Meta`, `FormatPNG`, `FormatWEBP`, `FormatBMP`, `FormatGIF`, `FormatJPEG`, `FormatNPBM`, `FormatQOI`, `FormatTGA`, `FormatWBMP`, `FormatETC2`, `FormatHNSM`, `FormatNIE`, `FormatTH` | Image config from `Probe`/decode; image format FourCC constants.                                                                                                                                                                        |
@@ -346,7 +348,9 @@ cfg, err := image.DecodeConfig(f)
 | `ErrDstTooSmall`                                                                                                                                                                     | Sentinel for a destination too small (host layout or guest scratch).                                                                                                                                                                    |
 | `*DstTooSmallError`                                                                                                                                                                  | Structured error with required buffer size and image dimensions; matches `ErrDstTooSmall`.                                                                                                                                              |
 
-A `Decoder` is not safe for concurrent use. Use one decoder per goroutine, or serialize access.
+A `Decoder` remains single-goroutine: it is not safe for concurrent use. Use one decoder per goroutine, or serialize access.
+
+`New` starts with 32 MiB of guest linear memory. `Reserve` grows that memory up to the 256 MiB generated maximum.
 
 ## Performance
 

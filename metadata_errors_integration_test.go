@@ -137,6 +137,7 @@ func TestIntegrationMetadataPreservesDecodeState(t *testing.T) {
 	if _, err := d.Metadata(src); err != nil {
 		t.Fatalf("Metadata: %v", err)
 	}
+	reserveForDecode(t, d, src)
 
 	dst := image.NewRGBA(image.Rect(0, 0, 160, 120))
 	if _, err := d.DecodeRGBA(dst, src); err != nil {

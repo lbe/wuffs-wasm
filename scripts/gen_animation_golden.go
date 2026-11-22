@@ -81,7 +81,7 @@ func writeManifest(manifest string, fixtures []animationFixture) error {
 		if n, err := d.FrameCount(src); err != nil || n != fx.frames {
 			return fmt.Errorf("FrameCount(%s) = %d, %v; want %d", fx.file, n, err, fx.frames)
 		}
-		if err := d.Reserve(int(meta.Stride)*int(meta.Height), len(src)); err != nil {
+		if err := d.Reserve(int(meta.Stride)*int(meta.Height)+int(meta.WorkbufLen), len(src)); err != nil {
 			return fmt.Errorf("Reserve(%s): %w", fx.file, err)
 		}
 		w, h := int(meta.Width), int(meta.Height)

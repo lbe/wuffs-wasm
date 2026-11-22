@@ -56,7 +56,7 @@ LDFLAGS=(
   -Wl,--no-entry
   -Wl,--gc-sections
   -Wl,-z,stack-size=8388608
-  -Wl,--initial-memory=134217728
+  -Wl,--initial-memory=33554432
   -Wl,--max-memory=268435456
 )
 

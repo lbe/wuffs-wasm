@@ -118,7 +118,7 @@ func TestIntegrationGIFAnimationCharacterization(t *testing.T) {
 		if w != 30 || h != 20 {
 			t.Fatalf("Probe(muybridge.gif) = %dx%d, want 30x20", w, h)
 		}
-		if err := d.Reserve(int(probe.Stride)*h, len(src)); err != nil {
+		if err := d.Reserve(int(probe.Stride)*h+int(probe.WorkbufLen), len(src)); err != nil {
 			t.Fatalf("Reserve error = %v, want nil", err)
 		}
 		for i := 0; i < 15; i++ {
@@ -169,7 +169,7 @@ func TestIntegrationGIFAnimationCharacterization(t *testing.T) {
 			t.Fatalf("Probe(animated-red-blue.gif) error = %v, want nil", err)
 		}
 		w, h := int(probe.Width), int(probe.Height)
-		if err := d.Reserve(int(probe.Stride)*h, len(src)); err != nil {
+		if err := d.Reserve(int(probe.Stride)*h+int(probe.WorkbufLen), len(src)); err != nil {
 			t.Fatalf("Reserve error = %v, want nil", err)
 		}
 		full := image.Rect(0, 0, w, h)

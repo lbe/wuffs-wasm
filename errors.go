@@ -35,7 +35,8 @@ var (
 	ErrSrcTooLarge = fmt.Errorf("wuffs: source data too large for src slot")
 
 	// ErrDecode is returned on general decode failures, including zero
-	// src_len or bad meta_off values.
+	// src_len or bad meta_off values, and from DecodeFrame when a frame
+	// duration does not fit time.Duration.
 	ErrDecode = fmt.Errorf("wuffs: decode error")
 
 	// ErrDstTooSmall is the sentinel matched by (*DstTooSmallError).Is.
@@ -75,14 +76,16 @@ func errFromGuestReturn(ret int32) error {
 //     necessarily the guest meta value in this case.
 //   - Guest scratch errors: the guest destination slot (dst slot) was
 //     exhausted. Stride is the guest metadata requirement
-//     (guest-reported stride), MinBytes is the guest-reported stride*height,
-//     and Width/Height come from the guest meta slot.
+//     (guest-reported stride), MinBytes is the guest-reported stride*height
+//     plus the guest-reported work buffer length (the dst slot size to pass
+//     to Reserve), and Width/Height come from the guest meta slot.
 //
 // In both cases Width and Height are the decoded image dimensions in pixels.
 type DstTooSmallError struct {
 	// MinBytes is the minimum number of bytes required for the destination buffer.
 	// For host layout errors it is the required Stride*Height in host bytes.
-	// For guest scratch errors it is the guest-reported stride*height.
+	// For guest scratch errors it is the guest-reported stride*height plus
+	// work buffer length: the dst slot size to Reserve before retrying.
 	MinBytes uint32
 
 	// Width is the decoded image width in pixels, as reported by the guest

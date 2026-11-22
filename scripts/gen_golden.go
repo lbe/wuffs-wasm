@@ -36,7 +36,7 @@ func main() {
 	}
 
 	dst := image.NewRGBA(image.Rect(0, 0, int(meta.Width), int(meta.Height)))
-	if err = d.Reserve(int(meta.Stride)*int(meta.Height), len(pngSrc)); err != nil {
+	if err = d.Reserve(int(meta.Stride)*int(meta.Height)+int(meta.WorkbufLen), len(pngSrc)); err != nil {
 		fmt.Fprintf(os.Stderr, "RequiredReserve: %v\n", err)
 		os.Exit(1)
 	}

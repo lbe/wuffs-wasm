@@ -17,7 +17,7 @@ import (
 // benchDecodeRGBA benchmarks PNG decode of the named fixture into an RGBA
 // image of the given decoded size (width×height). It allocates one correctly
 // sized destination outside the timed loop, sizes the decoder's wasm slots
-// via RequiredReserve before the timer, and reuses the same destination for
+// via reserveForDecode before the timer, and reuses the same destination for
 // every iteration so allocations occur only in setup.
 func benchDecodeRGBA(b *testing.B, path string, width, height int) {
 	src, err := os.ReadFile(path)
@@ -26,10 +26,7 @@ func benchDecodeRGBA(b *testing.B, path string, width, height int) {
 	}
 
 	d := New()
-	srcBytes := len(src)
-	if resErr := RequiredReserve(d, width*height*4, srcBytes); resErr != nil {
-		b.Fatalf("RequiredReserve: %v", resErr)
-	}
+	reserveForDecode(b, d, src)
 
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 
@@ -81,9 +78,7 @@ func BenchmarkDecodeNRGBA_PNG_AlphaPixels(b *testing.B) {
 		b.Fatalf("reading alpha fixture: %v", err)
 	}
 	d := New()
-	if err := RequiredReserve(d, 3*1*4, len(pngSrc)); err != nil {
-		b.Fatalf("RequiredReserve: %v", err)
-	}
+	reserveForDecode(b, d, pngSrc)
 	dst := image.NewNRGBA(image.Rect(0, 0, 3, 1))
 	if _, err := d.DecodeNRGBA(dst, pngSrc); err != nil {
 		b.Fatalf("warmup DecodeNRGBA: %v", err)
@@ -105,9 +100,7 @@ func benchDecodeGray(b *testing.B, pngPath string, width, height int) {
 	}
 
 	d := New()
-	if resErr := RequiredReserve(d, width*height*4, len(pngSrc)); resErr != nil {
-		b.Fatalf("RequiredReserve: %v", resErr)
-	}
+	reserveForDecode(b, d, pngSrc)
 	dst := image.NewGray(image.Rect(0, 0, width, height))
 	if _, err := d.DecodeGray(dst, pngSrc); err != nil {
 		b.Fatalf("warmup DecodeGray: %v", err)

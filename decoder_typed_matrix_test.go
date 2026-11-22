@@ -110,10 +110,13 @@ func commonCases() []caseEntry {
 	const (
 		matrixW = 160
 		matrixH = 120
+		// matrixWorkbuf is the fake Probe work buffer length; the destination
+		// Reserve must add it to the canvas bytes.
+		matrixWorkbuf = 57720
 	)
 	// src is opaque to the recorder; only its length feeds the Reserve calls.
 	src := []byte("wuffs PNG typed matrix fixture")
-	validMeta := &Meta{Width: matrixW, Height: matrixH}
+	validMeta := &Meta{Width: matrixW, Height: matrixH, WorkbufLen: matrixWorkbuf}
 
 	return []caseEntry{
 		{
@@ -140,12 +143,12 @@ func commonCases() []caseEntry {
 					[]string{"Reserve", "Probe", "Reserve", h.allocOp, h.decodeOp})
 
 				// Exact Reserve arguments: source Reserve(0, len(src)) then
-				// destination Reserve(Width*Height*4, len(src)). The guest
-				// size is four bytes per pixel for every helper, including
-				// Gray's one-byte host output.
+				// destination Reserve(Width*Height*4+WorkbufLen, len(src)). The
+				// guest canvas is four bytes per pixel for every helper, including
+				// Gray's one-byte host output, followed by the work buffer.
 				assertMatrixReserveArgs(t, h.name, rec,
 					reserveCall{dstBytes: 0, srcBytes: len(src)},
-					reserveCall{dstBytes: matrixW * matrixH * 4, srcBytes: len(src)})
+					reserveCall{dstBytes: matrixW*matrixH*4 + matrixWorkbuf, srcBytes: len(src)})
 
 				// The returned Meta mirrors the metadata exposed by Probe.
 				if meta.Width != matrixW || meta.Height != matrixH {
@@ -236,7 +239,7 @@ func commonCases() []caseEntry {
 				assertMatrixOps(t, h.name, rec.ops, []string{"Reserve", "Probe", "Reserve"})
 				assertMatrixReserveArgs(t, h.name, rec,
 					reserveCall{dstBytes: 0, srcBytes: len(src)},
-					reserveCall{dstBytes: matrixW * matrixH * 4, srcBytes: len(src)})
+					reserveCall{dstBytes: matrixW*matrixH*4 + matrixWorkbuf, srcBytes: len(src)})
 			},
 		},
 		{

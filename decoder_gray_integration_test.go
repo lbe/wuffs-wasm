@@ -70,6 +70,7 @@ func TestIntegrationDecodeGray(t *testing.T) {
 	rect, dstStride := dst.Rect, dst.Stride
 
 	d := wuffs.New()
+	reserveForDecode(t, d, src)
 	initialSlot := wuffs.CurrentDstSlotLen(d)
 	meta, err := d.DecodeGray(dst, src)
 	if err != nil {
@@ -121,9 +122,7 @@ func TestIntegrationDecodeGray(t *testing.T) {
 	if _, err := d.Probe(src); err != nil {
 		t.Fatalf("Probe after DecodeGray: %v", err)
 	}
-	if err := wuffs.RequiredReserve(d, grayFixtureWidth*grayFixtureHeight*4, len(src)); err != nil {
-		t.Fatalf("Reserve after DecodeGray: %v", err)
-	}
+	reserveForDecode(t, d, src)
 	rgba := image.NewRGBA(image.Rect(0, 0, grayFixtureWidth, grayFixtureHeight))
 	if _, err := d.DecodeRGBA(rgba, src); err != nil {
 		t.Fatalf("DecodeRGBA after DecodeGray: %v", err)
@@ -139,9 +138,7 @@ func TestIntegrationDecodeGrayNoAllocs(t *testing.T) {
 	src := loadFixture(t, "bricks-color.png")
 	dst := image.NewGray(image.Rect(0, 0, grayFixtureWidth, grayFixtureHeight))
 	d := wuffs.New()
-	if err := wuffs.RequiredReserve(d, grayFixtureWidth*grayFixtureHeight*4, len(src)); err != nil {
-		t.Fatalf("RequiredReserve: %v", err)
-	}
+	reserveForDecode(t, d, src)
 	if _, err := d.DecodeGray(dst, src); err != nil {
 		t.Fatalf("warmup DecodeGray: %v", err)
 	}
@@ -162,7 +159,9 @@ func TestIntegrationDecodeGrayWEBP(t *testing.T) {
 	src := loadFixture(t, "bricks-color.lossless.webp")
 	dst := image.NewGray(image.Rect(0, 0, grayFixtureWidth, grayFixtureHeight))
 
-	meta, err := wuffs.New().DecodeGray(dst, src)
+	d := wuffs.New()
+	reserveForDecode(t, d, src)
+	meta, err := d.DecodeGray(dst, src)
 	if err != nil {
 		t.Fatalf("DecodeGray WEBP: %v", err)
 	}
@@ -200,7 +199,9 @@ func TestIntegrationDecodeGrayDestinationErrors(t *testing.T) {
 	}
 	for _, tc := range malformed {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := wuffs.New().DecodeGray(tc.dst, src)
+			d := wuffs.New()
+			reserveForDecode(t, d, src)
+			_, err := d.DecodeGray(tc.dst, src)
 			if !errors.Is(err, wuffs.ErrBadImage) {
 				t.Fatalf("DecodeGray error = %v, want ErrBadImage", err)
 			}
@@ -210,7 +211,9 @@ func TestIntegrationDecodeGrayDestinationErrors(t *testing.T) {
 	t.Run("short stride reports one-byte host minimum", func(t *testing.T) {
 		stride := grayFixtureWidth - 1
 		dst := &image.Gray{Rect: validRect, Stride: stride, Pix: make([]byte, stride*grayFixtureHeight)}
-		_, err := wuffs.New().DecodeGray(dst, src)
+		d := wuffs.New()
+		reserveForDecode(t, d, src)
+		_, err := d.DecodeGray(dst, src)
 		var small *wuffs.DstTooSmallError
 		if !errors.As(err, &small) || !errors.Is(err, wuffs.ErrDstTooSmall) {
 			t.Fatalf("DecodeGray error = %v, want DstTooSmallError", err)
@@ -223,7 +226,9 @@ func TestIntegrationDecodeGrayDestinationErrors(t *testing.T) {
 	t.Run("short Pix reports padded one-byte host minimum", func(t *testing.T) {
 		stride := grayFixtureWidth + 8
 		dst := &image.Gray{Rect: validRect, Stride: stride, Pix: make([]byte, stride*grayFixtureHeight-1)}
-		_, err := wuffs.New().DecodeGray(dst, src)
+		d := wuffs.New()
+		reserveForDecode(t, d, src)
+		_, err := d.DecodeGray(dst, src)
 		var small *wuffs.DstTooSmallError
 		if !errors.As(err, &small) || !errors.Is(err, wuffs.ErrDstTooSmall) {
 			t.Fatalf("DecodeGray error = %v, want DstTooSmallError", err)
@@ -236,6 +241,8 @@ func TestIntegrationDecodeGrayDestinationErrors(t *testing.T) {
 
 func TestIntegrationDecodeGrayGuestReserveRetry(t *testing.T) {
 	src := loadFixture(t, "bricks-color.png")
+	probe := reserveForDecode(t, wuffs.New(), src)
+	wantMinBytes := probe.Stride*probe.Height + probe.WorkbufLen
 	restore := wuffs.SetInitialDstSlotBytes(1024)
 	defer restore()
 
@@ -247,14 +254,14 @@ func TestIntegrationDecodeGrayGuestReserveRetry(t *testing.T) {
 	if !errors.As(err, &small) || !errors.Is(err, wuffs.ErrDstTooSmall) {
 		t.Fatalf("guest-short DecodeGray error = %v, want DstTooSmallError", err)
 	}
-	if small.MinBytes != grayFixtureWidth*grayFixtureHeight*4 || small.Stride != grayFixtureWidth*4 {
-		t.Errorf("guest shortage = MinBytes %d Stride %d, want four-byte scratch %d %d", small.MinBytes, small.Stride, grayFixtureWidth*4, grayFixtureWidth*4)
+	if small.MinBytes != wantMinBytes || small.Stride != grayFixtureWidth*4 {
+		t.Errorf("guest shortage = MinBytes %d Stride %d, want canvas+workbuf %d and stride %d", small.MinBytes, small.Stride, wantMinBytes, grayFixtureWidth*4)
 	}
 	if got := wuffs.CurrentDstSlotLen(d); got != initialSlot {
 		t.Errorf("failed decode changed guest dst slot length from %d to %d", initialSlot, got)
 	}
 
-	if err = wuffs.RequiredReserve(d, grayFixtureWidth*grayFixtureHeight*4, len(src)); err != nil {
+	if err = wuffs.RequiredReserve(d, int(small.MinBytes), len(src)); err != nil {
 		t.Fatalf("Reserve for guest retry: %v", err)
 	}
 	meta, err := d.DecodeGray(dst, src)
@@ -284,7 +291,11 @@ func TestIntegrationDecodeGraySentinelErrors(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := wuffs.New().DecodeGray(dst, tc.src)
+			d := wuffs.New()
+			if errors.Is(tc.want, wuffs.ErrDecode) && len(tc.src) > 0 {
+				reserveForDecode(t, d, tc.src)
+			}
+			_, err := d.DecodeGray(dst, tc.src)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("DecodeGray error = %v, want errors.Is(..., %v)", err, tc.want)
 			}

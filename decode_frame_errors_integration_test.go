@@ -42,7 +42,7 @@ func TestIntegrationDecodeFrameErrors(t *testing.T) {
 			t.Fatal("Probe(truncated muybridge.gif) returned nil Meta, want non-nil")
 		}
 		w, h := int(probe.Width), int(probe.Height)
-		if reserveErr := wuffs.RequiredReserve(d, int(probe.Stride)*h, len(trunc)); reserveErr != nil {
+		if reserveErr := wuffs.RequiredReserve(d, int(probe.Stride)*h+int(probe.WorkbufLen), len(trunc)); reserveErr != nil {
 			t.Fatalf("RequiredReserve: %v", reserveErr)
 		}
 

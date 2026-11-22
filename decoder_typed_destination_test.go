@@ -169,7 +169,9 @@ func TestDecodeTypedDestinationsValidateLayouts(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(typ.name+"/"+tc.name, func(t *testing.T) {
 				dst := tc.makeDst(kind, typ.bpp)
-				method := reflect.ValueOf(wuffs.New()).MethodByName(typ.method)
+				d := wuffs.New()
+				reserveForDecode(t, d, src)
+				method := reflect.ValueOf(d).MethodByName(typ.method)
 				if !method.IsValid() {
 					t.Errorf("Decoder.%s method is missing", typ.method)
 					return

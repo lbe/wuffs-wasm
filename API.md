@@ -16,11 +16,12 @@ below) without allocating or replacing `Pix`.
 
 - No CGO. Consumer types live in the root package.
 - Hot path takes `[]byte` source, not `io.Reader`.
-- `New()` does not reserve 50MP (or any large cap). Guest memory grows with
-  `Reserve`.
+- `New()` starts with 32 MiB of guest linear memory. Guest memory grows
+  with `Reserve` up to the 256 MiB generated maximum.
 - Wuffs rejects width or height above `0xFFFFFF` (16_777_215). This package
   does the same.
-- A `Decoder` is not safe for concurrent use. Create one per goroutine.
+- A `Decoder` remains single-goroutine: it is not safe for concurrent use.
+  Create one per goroutine.
 - Not in this package: per-format decoder types; Wuffs `pixel_buffer` /
   `io_buffer` / quirk APIs; compression/hash/JSON codecs; AVIF, TIFF, ICO,
   HEIC, JPEG XL, SVG, PSD.
@@ -35,7 +36,7 @@ Happy path (still image or frame 0):
 d := wuffs.New()
 meta, err := d.Probe(src)
 if err != nil { /* ... */ }
-if err := d.Reserve(int(meta.Stride)*int(meta.Height), len(src)); err != nil { /* ... */ }
+if err := d.Reserve(int(meta.Stride)*int(meta.Height)+int(meta.WorkbufLen), len(src)); err != nil { /* ... */ }
 dst := image.NewRGBA(image.Rect(0, 0, int(meta.Width), int(meta.Height)))
 meta, err = d.DecodeRGBA(dst, src)
 ```
@@ -65,6 +66,7 @@ type Meta struct {
     Stride       uint32 // bytes per row for this package’s dest layout (Width*4 for RGBA)
     BytesWritten uint32 // 0 after Probe; pixel bytes after a successful decode
     Format       uint32 // image FourCC (FormatPNG, FormatJPEG, …)
+    WorkbufLen   uint32 // Wuffs decoder work buffer bytes (max of workbuf_len)
 }
 
 type Frame struct {
@@ -114,7 +116,7 @@ type Metadata struct {
 }
 
 type DstTooSmallError struct {
-    MinBytes uint32 // required len(Pix) for Stride*Height
+    MinBytes uint32 // host: required len(Pix); guest: Stride*Height + WorkbufLen
     Width    uint32
     Height   uint32
     Stride   uint32
@@ -124,7 +126,9 @@ func (e *DstTooSmallError) Error() string
 func (e *DstTooSmallError) Is(target error) bool // true if target == ErrDstTooSmall
 ```
 
-`Duration` is converted from Wuffs flicks (1 flick = 1/705_600_000 s).
+`Duration` is converted from Wuffs flicks (1 flick = 1/705_600_000 s) with
+flick precision and truncated to whole nanoseconds. `DecodeFrame` returns
+`ErrDecode` when a frame duration does not fit `time.Duration`.
 
 ---
 
@@ -216,13 +220,18 @@ func (d *Decoder) Reserve(dstBytes, srcBytes int) error
 
 Grows wasm src and dst **scratch** slots. Call before `Probe` if `src` exceeds
 the default src cap (64 KiB). Call before decode with
-`dstBytes >= int(meta.Stride)*int(meta.Height)`.
+`dstBytes >= int(meta.Stride)*int(meta.Height)+int(meta.WorkbufLen)`. The dst
+slot holds the decoded canvas followed by the Wuffs decoder work buffer, as in
+the Wuffs API where the caller supplies the work buffer sized by
+`workbuf_len`. PNG needs about one decoded image of work buffer; formats
+without one report `WorkbufLen` 0.
 
 This is the only intended allocation point besides `New()`.
 
 `DecodeRGBA` / `DecodeFrame` / `Probe` do not auto-grow guest memory past
 what `Reserve` (or `New` defaults) already provided. Insufficient guest dst
-slot → `*DstTooSmallError` with dimensions filled in.
+slot → `*DstTooSmallError` with dimensions filled in and `MinBytes` equal to
+`Stride*Height + WorkbufLen`; `Reserve(int(e.MinBytes), len(src))` and retry.
 
 ### Decode still image / frame 0
 
@@ -257,6 +266,10 @@ Contract for all three:
   rows with `copy`.
 - `DecodeGray` keeps guest `WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL` scratch with
   the existing gray conversion kernel.
+- A successful `DecodeNRGBA` or `DecodeGray` call populates its entire decoded
+  canvas. The guest clears full-canvas scratch before decoding, so pixels
+  outside the first frame's bounds are zero (transparent black for NRGBA)
+  and no pixels from an earlier use of the decoder are retained.
 - `DecodeRGBA` is frame 0 of an animation. Overall canvas size, not the first
   frame’s dirty rect, unless they coincide.
 
@@ -286,6 +299,8 @@ file is animated; still images return `0`.
 `DecodeFrame`:
 
 - `index` is `0 .. FrameCount-1`. Out of range → `ErrDecode`.
+- A frame duration outside `time.Duration` → `ErrDecode`; no pixels are
+  copied and the reusable `Meta` and `Frame` are not updated.
 - `dst` is the **overall canvas** (`Probe` width×height), same Pix contract as
   `DecodeRGBA`.
 - Pixels for that frame are written into `dst` at `Frame.Bounds`. The method

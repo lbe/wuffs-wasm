@@ -6,10 +6,14 @@ package wuffs
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"hash/crc32"
 	"image"
+	"image/color"
+	"image/gif"
 	"testing"
+	"time"
 )
 
 // animatedFrame1DeltaCRC is the CRC32-IEEE of the Frame.Bounds
@@ -145,7 +149,7 @@ func TestIntegrationDecodeFrameCore(t *testing.T) {
 			t.Fatalf("Probe(animated-red-blue.gif) error = %v, want nil", err)
 		}
 		canvasW, canvasH := int(probe.Width), int(probe.Height)
-		if reserveErr := d.Reserve(int(probe.Stride)*canvasH, len(src)); reserveErr != nil {
+		if reserveErr := d.Reserve(int(probe.Stride)*canvasH+int(probe.WorkbufLen), len(src)); reserveErr != nil {
 			t.Fatalf("Reserve error = %v, want nil", reserveErr)
 		}
 
@@ -179,4 +183,68 @@ func TestIntegrationDecodeFrameCore(t *testing.T) {
 			t.Errorf("frame-1 sub-rect CRC = 0x%08X, want pinned 0x%08X", got, animatedFrame1DeltaCRC)
 		}
 	})
+}
+
+// TestIntegrationDecodeFrameTwentySecondGIFDuration verifies that a GIF frame
+// delay of 20 s (2000 centiseconds) returns exactly 20*time.Second.
+func TestIntegrationDecodeFrameTwentySecondGIFDuration(t *testing.T) {
+	palette := color.Palette{color.NRGBA{R: 0xFF, A: 0xFF}}
+	var buf bytes.Buffer
+	err := gif.EncodeAll(&buf, &gif.GIF{
+		Image: []*image.Paletted{image.NewPaletted(image.Rect(0, 0, 1, 1), palette)},
+		Delay: []int{2000},
+	})
+	if err != nil {
+		t.Fatalf("gif.EncodeAll: %v", err)
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	frame, err := New().DecodeFrame(dst, buf.Bytes(), 0)
+	if err != nil {
+		t.Fatalf("DecodeFrame: %v", err)
+	}
+	if frame.Duration != 20*time.Second {
+		t.Errorf("Frame.Duration = %v, want %v", frame.Duration, 20*time.Second)
+	}
+}
+
+// TestIntegrationDecodeFrameDurationOverflow verifies that DecodeFrame
+// returns ErrDecode with a nil frame when the guest duration exceeds
+// time.Duration, and publishes neither lastMeta nor lastFrame.
+func TestIntegrationDecodeFrameDurationOverflow(t *testing.T) {
+	// firstUnrepresentableFlicks matches the first unrepresentable flick
+	// count in TestUnitFrameMetaDuration: floor(2^63 * 705_600_000 / 1e9) + 1.
+	const firstUnrepresentableFlicks = 6508011309204729811
+
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	src := niaEncodeRGBA(img)
+	binary.LittleEndian.PutUint64(src[16:24], firstUnrepresentableFlicks)
+
+	d := New()
+	meta, err := d.Probe(src)
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if reserveErr := d.Reserve(int(meta.Stride*meta.Height)+int(meta.WorkbufLen), len(src)); reserveErr != nil {
+		t.Fatalf("Reserve: %v", reserveErr)
+	}
+
+	sentinelMeta := Meta{Width: 0xBEEF, Format: 0xCAFE}
+	sentinelFrame := Frame{Index: 0x5EED, Duration: 0x5EED}
+	d.lastMeta = sentinelMeta
+	d.lastFrame = sentinelFrame
+
+	frame, err := d.DecodeFrame(img, src, 0)
+	if !errors.Is(err, ErrDecode) {
+		t.Fatalf("DecodeFrame error = %v, want ErrDecode", err)
+	}
+	if frame != nil {
+		t.Errorf("DecodeFrame frame = %+v, want nil", frame)
+	}
+	if d.lastMeta != sentinelMeta {
+		t.Errorf("lastMeta = %+v, want unchanged sentinel %+v", d.lastMeta, sentinelMeta)
+	}
+	if d.lastFrame != sentinelFrame {
+		t.Errorf("lastFrame = %+v, want unchanged sentinel %+v", d.lastFrame, sentinelFrame)
+	}
 }

@@ -60,7 +60,7 @@ func TestIntegrationNIEAnimationCharacterization(t *testing.T) {
 		if w != 64 || h != 48 {
 			t.Fatalf("Probe(animated-red-blue.nia) = %dx%d, want 64x48", w, h)
 		}
-		if err := d.Reserve(int(probe.Stride)*h, len(src)); err != nil {
+		if err := d.Reserve(int(probe.Stride)*h+int(probe.WorkbufLen), len(src)); err != nil {
 			t.Fatalf("Reserve error = %v, want nil", err)
 		}
 		for i := 0; i < 4; i++ {
@@ -104,7 +104,7 @@ func TestIntegrationNIEAnimationCharacterization(t *testing.T) {
 			t.Fatalf("Probe(animated-red-blue.nia) error = %v, want nil", err)
 		}
 		w, h := int(probe.Width), int(probe.Height)
-		if reserveErr := d.Reserve(int(probe.Stride)*h, len(src)); reserveErr != nil {
+		if reserveErr := d.Reserve(int(probe.Stride)*h+int(probe.WorkbufLen), len(src)); reserveErr != nil {
 			t.Fatalf("Reserve error = %v, want nil", reserveErr)
 		}
 		dst := image.NewRGBA(image.Rect(0, 0, w, h))

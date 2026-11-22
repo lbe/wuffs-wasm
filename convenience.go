@@ -122,7 +122,7 @@ func decodePrep(src []byte, ops decoderOperations, bytesPerPixel int) (decoderOp
 		return nil, 0, 0, 0, err
 	}
 
-	if err = ops.Reserve(guestLen, len(src)); err != nil {
+	if err = ops.Reserve(guestLen+int(meta.WorkbufLen), len(src)); err != nil {
 		return nil, 0, 0, 0, err
 	}
 

@@ -125,7 +125,7 @@ func TestUnitPublicAPIBoundary(t *testing.T) {
 		"DstTooSmallError": {"Error", "Is"},
 	}
 	wantFields := map[string][]string{
-		"Meta":             {"Err", "Width", "Height", "Stride", "BytesWritten", "Format"},
+		"Meta":             {"Err", "Width", "Height", "Stride", "BytesWritten", "Format", "WorkbufLen"},
 		"DstTooSmallError": {"MinBytes", "Width", "Height", "Stride"},
 		"Decoder":          {}, // none exported
 		"Frame":            {"Index", "Bounds", "Duration", "Disposal", "Opaque", "Overwrite", "Background", "IOPosition"},

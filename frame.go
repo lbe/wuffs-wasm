@@ -13,7 +13,9 @@ type Frame struct {
 	// Bounds is the frame rectangle inside the overall canvas (half-open).
 	Bounds image.Rectangle
 	// Duration is how long to display the frame. Zero means still or display
-	// forever. Durations convert from Wuffs flicks (1 flick = 1/705_600_000 s).
+	// forever. Durations convert from Wuffs flicks (1 flick = 1/705_600_000 s)
+	// with flick precision, truncated to whole nanoseconds. DecodeFrame returns
+	// ErrDecode when the duration does not fit time.Duration.
 	Duration time.Duration
 	// Disposal says what to do with the frame rectangle after display.
 	Disposal Disposal

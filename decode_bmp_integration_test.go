@@ -79,7 +79,7 @@ func TestIntegrationBMPDecodeCharacterization(t *testing.T) {
 			t.Fatalf("Probe Meta = %+v, want {W:%d H:%d S:%d}", probe, wantWidth, wantHeight, wantStride)
 		}
 
-		if reserveErr := d.Reserve(wantBytes, len(bmpSrc)); reserveErr != nil {
+		if reserveErr := d.Reserve(wantBytes+int(probe.WorkbufLen), len(bmpSrc)); reserveErr != nil {
 			t.Fatalf("Reserve(%d, %d) error = %v, want nil", wantBytes, len(bmpSrc), reserveErr)
 		}
 
@@ -108,7 +108,9 @@ func TestIntegrationBMPDecodeCharacterization(t *testing.T) {
 
 		// Oracle: the same canvas decoded from the pixel-identical PNG fixture.
 		oracle := image.NewRGBA(image.Rect(0, 0, wantWidth, wantHeight))
-		if _, err := New().DecodeRGBA(oracle, pngSrc); err != nil {
+		oracleDecoder := New()
+		reserveForDecode(t, oracleDecoder, pngSrc)
+		if _, err := oracleDecoder.DecodeRGBA(oracle, pngSrc); err != nil {
 			t.Fatalf("PNG oracle DecodeRGBA error = %v, want nil", err)
 		}
 		if !bytes.Equal(dst.Pix, oracle.Pix) {
@@ -140,7 +142,7 @@ func TestIntegrationBMPDecodeCharacterization(t *testing.T) {
 			t.Errorf("Probe(corrupt BMP) Meta.BytesWritten = %d, want 0", meta.BytesWritten)
 		}
 
-		if reserveErr := d.Reserve(wantBytes, len(corrupt)); reserveErr != nil {
+		if reserveErr := d.Reserve(wantBytes+int(meta.WorkbufLen), len(corrupt)); reserveErr != nil {
 			t.Fatalf("Reserve(%d, %d) error = %v, want nil", wantBytes, len(corrupt), reserveErr)
 		}
 

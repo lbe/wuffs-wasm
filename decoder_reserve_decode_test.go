@@ -96,6 +96,7 @@ func TestDecodeRGBAHonorsReservedSourceCapacity(t *testing.T) {
 		// Exactly the reserved SrcLen: valid PNG prefix plus trailing zeros.
 		src := make([]byte, reserved)
 		copy(src, base)
+		reserveForDecode(t, d, src)
 
 		dst := image.NewRGBA(image.Rect(0, 0, 160, 120))
 		prePixPtr := unsafe.SliceData(dst.Pix)

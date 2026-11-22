@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"image/color"
+	"image/gif"
 	"image/png"
 	"testing"
 	"unsafe"
@@ -267,4 +269,84 @@ func TestIntegrationDecodeNRGBAAllocatesTight(t *testing.T) {
 			t.Errorf("DecodeNRGBA(truncated) returned non-nil Meta, want nil")
 		}
 	})
+}
+
+// encodeOpaqueWhitePNG returns a 3×3 PNG whose every pixel is opaque white.
+func encodeOpaqueWhitePNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 3, 3))
+	for i := range img.Pix {
+		img.Pix[i] = 0xFF
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// encodePartialRedGIF returns a 3×3 GIF whose only frame is a 1×1 opaque-red
+// rectangle at (1,1). Pixels outside that rectangle are not covered by the
+// frame, so a correct decode leaves them transparent.
+func encodePartialRedGIF(t *testing.T) []byte {
+	t.Helper()
+	palette := color.Palette{color.NRGBA{}, color.NRGBA{R: 0xFF, A: 0xFF}}
+	frame := image.NewPaletted(image.Rect(1, 1, 2, 2), palette)
+	frame.SetColorIndex(1, 1, 1)
+	var buf bytes.Buffer
+	err := gif.EncodeAll(&buf, &gif.GIF{
+		Image: []*image.Paletted{frame},
+		Delay: []int{0},
+		Config: image.Config{
+			ColorModel: palette,
+			Width:      3,
+			Height:     3,
+		},
+	})
+	if err != nil {
+		t.Fatalf("gif.EncodeAll: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// TestIntegrationDecodeNRGBAReusedDecoderClearsPartialCanvas verifies that a
+// decoder reused after an opaque image produces the same partial-GIF pixels
+// and metadata as a fresh decoder: pixels outside the frame rectangle are
+// transparent black, not leftovers from the earlier decode.
+func TestIntegrationDecodeNRGBAReusedDecoderClearsPartialCanvas(t *testing.T) {
+	whitePNG := encodeOpaqueWhitePNG(t)
+	partialGIF := encodePartialRedGIF(t)
+
+	reused := wuffs.New()
+	dst := image.NewNRGBA(image.Rect(0, 0, 3, 3))
+	wantRect, wantStride, wantPix := dst.Rect, dst.Stride, unsafe.SliceData(dst.Pix)
+	if _, err := reused.DecodeNRGBA(dst, whitePNG); err != nil {
+		t.Fatalf("DecodeNRGBA(white PNG): %v", err)
+	}
+	reusedMeta, err := reused.DecodeNRGBA(dst, partialGIF)
+	if err != nil {
+		t.Fatalf("reused DecodeNRGBA(partial GIF): %v", err)
+	}
+
+	freshDst := image.NewNRGBA(image.Rect(0, 0, 3, 3))
+	freshMeta, err := wuffs.New().DecodeNRGBA(freshDst, partialGIF)
+	if err != nil {
+		t.Fatalf("fresh DecodeNRGBA(partial GIF): %v", err)
+	}
+
+	if got := dst.NRGBAAt(0, 0); got != (color.NRGBA{}) {
+		t.Errorf("reused pixel (0,0) = %v, want transparent black", got)
+	}
+	if got, want := dst.NRGBAAt(1, 1), (color.NRGBA{R: 0xFF, A: 0xFF}); got != want {
+		t.Errorf("reused pixel (1,1) = %v, want %v", got, want)
+	}
+	if !bytes.Equal(dst.Pix, freshDst.Pix) {
+		t.Errorf("reused Pix = % X, want fresh Pix % X", dst.Pix, freshDst.Pix)
+	}
+	if dst.Rect != wantRect || dst.Stride != wantStride || unsafe.SliceData(dst.Pix) != wantPix {
+		t.Errorf("reused destination changed: Rect %v Stride %d, want Rect %v Stride %d and same Pix backing", dst.Rect, dst.Stride, wantRect, wantStride)
+	}
+	if *reusedMeta != *freshMeta {
+		t.Errorf("reused Meta = %+v, want fresh Meta %+v", *reusedMeta, *freshMeta)
+	}
 }

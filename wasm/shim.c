@@ -25,6 +25,22 @@ static uint8_t* bump_alloc(uint32_t size) {
   return p;
 }
 
+// workbuf_len stores the decoder's work buffer length in *out. Wuffs reports
+// it as a [min, max] range after decode_image_config; the shim uses max. It
+// returns 0 when the range is inverted or does not fit uint32_t.
+static int workbuf_len(wuffs_base__image_decoder* decoder, uint32_t* out) {
+  wuffs_base__range_ii_u64 r = wuffs_base__image_decoder__workbuf_len(decoder);
+  if (r.min_incl > r.max_incl || r.max_incl > UINT32_MAX) {
+    return 0;
+  }
+  *out = (uint32_t)r.max_incl;
+  return 1;
+}
+
+// The dst slot holds the decoded canvas followed by the decoder work buffer:
+// [dst_off, dst_off+need) pixels, then workbuf_len bytes. Wuffs work buffers
+// (a PNG needs about one decoded image) scale with the image, so they live in
+// the host-reserved dst slot rather than the fixed guest bump region.
 typedef struct wuffs_wasm_decode_meta {
   int32_t err;
   uint32_t width;
@@ -32,7 +48,11 @@ typedef struct wuffs_wasm_decode_meta {
   uint32_t stride;
   uint32_t bytes_written;
   uint32_t format;
+  uint32_t workbuf_len;
 } wuffs_wasm_decode_meta;
+
+_Static_assert(sizeof(wuffs_wasm_decode_meta) == 28,
+               "decode meta must be 28 bytes");
 
 enum {
   WUFFS_WASM_OK = 0,
@@ -438,8 +458,14 @@ static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off
 
   uint32_t width = wuffs_base__pixel_config__width(&ic.pixcfg);
   uint32_t height = wuffs_base__pixel_config__height(&ic.pixcfg);
+  uint32_t wb_len = 0;
+  if (!workbuf_len(decoder, &wb_len)) {
+    meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+  meta->workbuf_len = wb_len;
   uint64_t need = (uint64_t)width * (uint64_t)height * 4;
-  if (need == 0 || need > dst_cap) {
+  if (need == 0 || need + wb_len > dst_cap) {
     meta->width = width;
     meta->height = height;
     meta->stride = width * 4;
@@ -447,30 +473,22 @@ static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off
     return WUFFS_WASM_ERR_DST_TOO_SMALL;
   }
 
-  // Allocate workbuf sized by the decoder (not hardcoded).
-  // Wuffs reports workbuf length as range [L, L]; use max_incl as the byte length.
-  wuffs_base__range_ii_u64 wb_range = wuffs_base__image_decoder__workbuf_len(decoder);
-  if (wb_range.min_incl > wb_range.max_incl) {
-    meta->err = WUFFS_WASM_ERR_DECODE;
-    return WUFFS_WASM_ERR_DECODE;
-  }
-  uint32_t wb_len = (uint32_t)wb_range.max_incl;
-  if (wb_len == 0) {
-    wb_len = 64 * 1024;  // minimum 64 KiB fallback
-  }
-  uint8_t* workbuf = bump_alloc(wb_len);
-  wuffs_base__slice_u8 work_slice = {
-      .ptr = workbuf,
-      .len = wb_len,
-  };
+  // The work buffer follows the canvas in the dst slot.
+  wuffs_base__slice_u8 work_slice = {.ptr = dst_ptr + need, .len = wb_len};
 
   wuffs_base__pixel_buffer pb = {0};
-  wuffs_base__slice_u8 pix_slice = {.ptr = dst_ptr, .len = dst_cap};
+  wuffs_base__slice_u8 pix_slice = {.ptr = dst_ptr, .len = (size_t)need};
   status = wuffs_base__pixel_buffer__set_from_slice(&pb, &ic.pixcfg, pix_slice);
   if (status.repr != NULL) {
     meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
   }
+  // The dst slot is reused across calls, and decode_frame writes only the
+  // first frame's bounds (e.g. a partial GIF frame). Clear the full canvas so
+  // pixels outside those bounds are transparent black rather than leftovers
+  // from an earlier decode; the host copies the full canvas. decode_frame
+  // below clears its scratch the same way for the same reason.
+  memset(dst_ptr, 0, (size_t)need);
 
   wuffs_base__frame_config fc = {0};
   status = wuffs_base__image_decoder__decode_frame_config(decoder, &fc, &src);
@@ -566,6 +584,11 @@ static int32_t probe_image(uint32_t src_off, uint32_t src_len,
 
   uint32_t width = wuffs_base__pixel_config__width(&ic.pixcfg);
   uint32_t height = wuffs_base__pixel_config__height(&ic.pixcfg);
+  uint32_t wb_len = 0;
+  if (!workbuf_len(decoder, &wb_len)) {
+    meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
 
   meta->err = WUFFS_WASM_OK;
   meta->width = width;
@@ -573,6 +596,7 @@ static int32_t probe_image(uint32_t src_off, uint32_t src_len,
   meta->stride = width * 4;
   meta->bytes_written = 0;
   meta->format = fourcc;
+  meta->workbuf_len = wb_len;
   return WUFFS_WASM_OK;
 }
 
@@ -823,8 +847,15 @@ static int32_t decode_frame(uint32_t src_off, uint32_t src_len,
 
   uint32_t width = wuffs_base__pixel_config__width(&ic.pixcfg);
   uint32_t height = wuffs_base__pixel_config__height(&ic.pixcfg);
+  uint32_t wb_len = 0;
+  if (!workbuf_len(decoder, &wb_len)) {
+    dec_meta->err = WUFFS_WASM_ERR_DECODE;
+    frame_meta->err = WUFFS_WASM_ERR_DECODE;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+  dec_meta->workbuf_len = wb_len;
   uint64_t need = (uint64_t)width * (uint64_t)height * 4;
-  if (need == 0 || need > dst_cap) {
+  if (need == 0 || need + wb_len > dst_cap) {
     dec_meta->width = width;
     dec_meta->height = height;
     dec_meta->stride = width * 4;
@@ -833,26 +864,11 @@ static int32_t decode_frame(uint32_t src_off, uint32_t src_len,
     return WUFFS_WASM_ERR_DST_TOO_SMALL;
   }
 
-  // Allocate workbuf sized by the decoder (not hardcoded).
-  wuffs_base__range_ii_u64 wb_range =
-      wuffs_base__image_decoder__workbuf_len(decoder);
-  if (wb_range.min_incl > wb_range.max_incl) {
-    dec_meta->err = WUFFS_WASM_ERR_DECODE;
-    frame_meta->err = WUFFS_WASM_ERR_DECODE;
-    return WUFFS_WASM_ERR_DECODE;
-  }
-  uint32_t wb_len = (uint32_t)wb_range.max_incl;
-  if (wb_len == 0) {
-    wb_len = 64 * 1024;  // minimum 64 KiB fallback
-  }
-  uint8_t* workbuf = bump_alloc(wb_len);
-  wuffs_base__slice_u8 work_slice = {
-      .ptr = workbuf,
-      .len = wb_len,
-  };
+  // The work buffer follows the canvas in the dst slot.
+  wuffs_base__slice_u8 work_slice = {.ptr = dst_ptr + need, .len = wb_len};
 
   wuffs_base__pixel_buffer pb = {0};
-  wuffs_base__slice_u8 pix_slice = {.ptr = dst_ptr, .len = dst_cap};
+  wuffs_base__slice_u8 pix_slice = {.ptr = dst_ptr, .len = (size_t)need};
   status = wuffs_base__pixel_buffer__set_from_slice(&pb, &ic.pixcfg, pix_slice);
   if (status.repr != NULL) {
     dec_meta->err = WUFFS_WASM_ERR_DECODE;

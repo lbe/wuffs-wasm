@@ -93,7 +93,9 @@ func TestIntegrationDecodeNRGBA(t *testing.T) {
 func TestIntegrationDecodeNRGBAWEBP(t *testing.T) {
 	src := loadFixture(t, "bricks-color.lossless.webp")
 	dst := image.NewNRGBA(image.Rect(0, 0, 160, 120))
-	meta, err := wuffs.New().DecodeNRGBA(dst, src)
+	d := wuffs.New()
+	reserveForDecode(t, d, src)
+	meta, err := d.DecodeNRGBA(dst, src)
 	if err != nil {
 		t.Fatalf("DecodeNRGBA WEBP: %v", err)
 	}
@@ -154,16 +156,18 @@ func TestIntegrationDecodeNRGBAReserveAndSentinels(t *testing.T) {
 	defer restore()
 	d := wuffs.New()
 	dst := image.NewNRGBA(image.Rect(0, 0, alphaFixtureWidth, alphaFixtureHeight))
+	probe := reserveForDecode(t, wuffs.New(), src)
+	wantMinBytes := probe.Stride*probe.Height + probe.WorkbufLen
 	beforeSlot := wuffs.CurrentDstSlotLen(d)
 	_, err := d.DecodeNRGBA(dst, src)
 	var small *wuffs.DstTooSmallError
-	if !errors.As(err, &small) || small.MinBytes != alphaFixtureWidth*alphaFixtureHeight*4 || small.Stride != alphaFixtureWidth*4 {
-		t.Fatalf("guest shortage = %v, want four-byte scratch DstTooSmallError", err)
+	if !errors.As(err, &small) || small.MinBytes != wantMinBytes || small.Stride != alphaFixtureWidth*4 {
+		t.Fatalf("guest shortage = %v, want canvas+workbuf DstTooSmallError (MinBytes %d)", err, wantMinBytes)
 	}
 	if got := wuffs.CurrentDstSlotLen(d); got != beforeSlot {
 		t.Fatalf("guest shortage grew destination slot from %d to %d", beforeSlot, got)
 	}
-	if err := wuffs.RequiredReserve(d, alphaFixtureWidth*alphaFixtureHeight*4, len(src)); err != nil {
+	if err := wuffs.RequiredReserve(d, int(small.MinBytes), len(src)); err != nil {
 		t.Fatalf("RequiredReserve: %v", err)
 	}
 	if _, err := d.DecodeNRGBA(dst, src); err != nil {

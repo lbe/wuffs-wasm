@@ -1,11 +1,14 @@
 package wuffs
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"math"
+)
 
 // Meta holds the decoded image metadata written by the guest into the meta slot.
-// The guest writes metadata (err, width, height, stride, bytes_written, format)
-// into the meta slot after a successful or partial decode. The host reads it
-// back via readMeta.
+// The guest writes metadata (err, width, height, stride, bytes_written, format,
+// workbuf_len) into the meta slot after a successful or partial decode. The
+// host reads it back via readMeta.
 //
 // Memory layout (little-endian uint32):
 //
@@ -15,6 +18,7 @@ import "encoding/binary"
 //	[12] stride
 //	[16] bytes_written
 //	[20] format
+//	[24] workbuf_len
 type Meta struct {
 	Err          int32
 	Width        uint32
@@ -26,6 +30,11 @@ type Meta struct {
 	// FormatWBMP, FormatETC2, FormatHNSM, FormatNIE, FormatTH), written by
 	// the guest into the meta slot. Zero until populated.
 	Format uint32
+	// WorkbufLen is the Wuffs decoder work buffer length in bytes (the max
+	// of Wuffs workbuf_len). Decoding needs Stride*Height + WorkbufLen bytes
+	// of dst slot, so reserve that before decoding:
+	// Reserve(int(m.Stride*m.Height+m.WorkbufLen), len(src)).
+	WorkbufLen uint32
 }
 
 const (
@@ -59,16 +68,16 @@ const (
 )
 
 // readMeta reads the Meta struct from the guest meta slot at the given offset
-// in wasm linear memory. The meta slot is 24 bytes (6 uint32 fields):
-// err, width, height, stride, bytes_written, format.
+// in wasm linear memory. The meta slot is 28 bytes (7 uint32 fields):
+// err, width, height, stride, bytes_written, format, workbuf_len.
 //
 // It is an internal implementation detail of guest scratch management, not
 // part of the public API.
 func readMeta(mem []byte, metaOff uint32) Meta {
-	if int(metaOff)+24 > len(mem) {
+	if uint64(metaOff)+metaSlotBytes > uint64(len(mem)) {
 		return Meta{}
 	}
-	slot := mem[metaOff : metaOff+24]
+	slot := mem[metaOff : metaOff+metaSlotBytes]
 	return Meta{
 		Err:          int32(binary.LittleEndian.Uint32(slot[0:4])),
 		Width:        binary.LittleEndian.Uint32(slot[4:8]),
@@ -76,5 +85,17 @@ func readMeta(mem []byte, metaOff uint32) Meta {
 		Stride:       binary.LittleEndian.Uint32(slot[12:16]),
 		BytesWritten: binary.LittleEndian.Uint32(slot[16:20]),
 		Format:       binary.LittleEndian.Uint32(slot[20:24]),
+		WorkbufLen:   binary.LittleEndian.Uint32(slot[24:28]),
 	}
+}
+
+// guestDstBytes returns the dst-slot bytes the guest reported needing: the
+// Stride*Height canvas followed by the WorkbufLen work buffer, saturated at
+// math.MaxUint32.
+func guestDstBytes(m Meta) uint32 {
+	n := uint64(m.Stride)*uint64(m.Height) + uint64(m.WorkbufLen)
+	if n > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(n)
 }

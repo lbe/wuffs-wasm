@@ -29,13 +29,7 @@ func stdlibPremulRGBA(t *testing.T, src []byte) *image.RGBA {
 func decodeRGBAForTest(t *testing.T, src []byte) (*image.RGBA, *wuffs.Meta) {
 	t.Helper()
 	d := wuffs.New()
-	probe, err := d.Probe(src)
-	if err != nil {
-		t.Fatalf("Probe: %v", err)
-	}
-	if reserveErr := d.Reserve(int(probe.Stride)*int(probe.Height), len(src)); reserveErr != nil {
-		t.Fatalf("Reserve: %v", reserveErr)
-	}
+	probe := reserveForDecode(t, d, src)
 	dst := image.NewRGBA(image.Rect(0, 0, int(probe.Width), int(probe.Height)))
 	meta, err := d.DecodeRGBA(dst, src)
 	if err != nil {

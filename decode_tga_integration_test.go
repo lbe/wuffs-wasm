@@ -82,7 +82,9 @@ func TestIntegrationTGADecodeCharacterization(t *testing.T) {
 				// pixel-identical PNG fixture.
 				oracle := image.NewRGBA(image.Rect(0, 0, wantW, wantH))
 				pngSrc := loadFixture(t, fc.pngFile)
-				if _, err := wuffs.New().DecodeRGBA(oracle, pngSrc); err != nil {
+				oracleDecoder := wuffs.New()
+				reserveForDecode(t, oracleDecoder, pngSrc)
+				if _, err := oracleDecoder.DecodeRGBA(oracle, pngSrc); err != nil {
 					t.Fatalf("PNG oracle DecodeRGBA: %v", err)
 				}
 

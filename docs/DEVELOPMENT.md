@@ -106,7 +106,9 @@ parent/
 ```
 
 `wasm/build.sh` compiles `wasm/shim.c` against the Wuffs C headers in the
-sibling `wuffs-mirror-release-c` checkout. Test fixtures are copied from
+sibling `wuffs-mirror-release-c` checkout. It links the guest with 32 MiB of
+initial linear memory (`--initial-memory=33554432`), an 8 MiB stack, and a
+256 MiB maximum (`--max-memory=268435456`). Test fixtures are copied from
 `../wuffs/test/data/` into `testdata/`.
 
 ## Prerequisites
@@ -182,17 +184,34 @@ fuzzer.
   design conversation that set that order.
 - `wasm/shim.c` exports `wuffs_probe_image` (sniff + image config, no
   pixels), `wuffs_decode_image(src_off, src_len, dst_off, dst_cap, meta_off,
-  dst_pixfmt)` (full frame), `wuffs_frame_count`,
-  `wuffs_animation_loops`, `wuffs_decode_frame(src_off, src_len, dst_off,
-  dst_cap, decode_meta_off, frame_meta_off, index, dst_pixfmt)`, and
+  dst_pixfmt)` (clears full-canvas scratch, then decodes the first frame),
+  `wuffs_frame_count`, `wuffs_animation_loops`,
+  `wuffs_decode_frame(src_off, src_len, dst_off, dst_cap, decode_meta_off,
+  frame_meta_off, index, dst_pixfmt)`, and
   `wuffs_read_image_metadata` (metadata-only walk, no pixels). `dst_pixfmt`
   is 1=RGBA_PREMUL, 2=RGBA_NONPREMUL, 3=BGRA_PREMUL; any other value returns
   `WUFFS_WASM_ERR_BAD_ARG`. Changing any
   export requires `make generate`.
 - The guest writes a `metadata pack` (header + EXIF/ICC/XMP blobs) into
   guest dst scratch, and the host parses it and copies blobs to Go heap.
+- `wuffs_decode_frame` reports frame duration in Wuffs flicks. The host
+  converts it to `time.Duration` with a checked helper that truncates to whole
+  nanoseconds and returns `ErrDecode` for a duration outside `time.Duration`,
+  before `DecodeFrame` copies pixels or updates its reusable `Meta` and
+  `Frame`.
 - `internal/wuffswasm/wuffs.go` is generated from `wasm/wuffs.wasm` by
   `wasm2go`. Do not edit it by hand; regenerate with `make generate`.
+- `New` starts with 32 MiB of guest linear memory. Host slots live at or
+  above the 24 MiB host-slot floor (`hostSlotRegionBase = 0x01800000`);
+  the first 24 MiB stays reserved for guest static data, stack, and growth
+  headroom. `Reserve` grows guest linear memory toward the 256 MiB
+  generated maximum.
+- The guest bump region (from `0x900000`) holds only decoder objects and
+  metadata buffers, each capped at 4 MiB. The Wuffs work buffer, which scales
+  with the image (a PNG needs about one decoded image), lives in the dst slot
+  after the canvas. Decoding needs `Stride*Height + WorkbufLen` bytes of dst
+  slot; the guest returns `WUFFS_WASM_ERR_DST_TOO_SMALL` with `workbuf_len` in
+  the meta slot when the slot is short, never writing past it.
 
 ## Test fixtures
 
@@ -206,6 +225,9 @@ flowchart LR
     LC[LoopCount]
     DF[DecodeFrame]
     DR[DecodeRGBA]
+    DUR[checked flicks-to-Duration]
+    FR[Frame]
+    DNG[DecodeNRGBA / DecodeGray]
     PR[Probe]
     RS[Reserve]
   end
@@ -215,15 +237,31 @@ flowchart LR
     WDF[wuffs_decode_frame]
     WPR[wuffs_probe_image]
     WDI[wuffs_decode_image]
+    CLR[clear full-canvas scratch]
+    WDFR[decode first frame]
+  end
+  subgraph mem [guest linear memory]
+    BASE[32 MiB initial]
+    FLOOR[24 MiB host-slot floor]
+    MAX[256 MiB maximum]
   end
   PR --> WPR
   FC --> WFC
   LC --> WAL
   DF --> WDF
+  WDF -->|frame meta flicks| DUR
+  DUR -->|ok| FR
+  DUR -.->|overflow| ERR[ErrDecode]
+  DF -->|returns| FR
   DR --> DF
+  DNG --> WDI
+  WDI --> CLR --> WDFR
   RS -.->|after Reserve| PR
   RS -.->|after Reserve| FC
   RS -.->|after Reserve| LC
   RS -.->|after Reserve| DF
   RS -.->|after Reserve| DR
+  RS -.->|after Reserve| DNG
+  RS -->|grows| MAX
+  BASE --> FLOOR --> MAX
 ```

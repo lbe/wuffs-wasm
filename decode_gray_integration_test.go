@@ -3,6 +3,7 @@ package wuffs_test
 import (
 	"bytes"
 	"errors"
+	"image"
 	"image/color"
 	"image/png"
 	"testing"
@@ -284,4 +285,47 @@ func TestIntegrationDecodeGrayAllocatesTight(t *testing.T) {
 			t.Errorf("DecodeGray(truncated) returned non-nil Meta, want nil")
 		}
 	})
+}
+
+// TestIntegrationDecodeGrayReusedDecoderClearsPartialCanvas verifies that a
+// decoder reused after an opaque image produces the same partial-GIF gray
+// pixels and metadata as a fresh decoder: pixels outside the frame rectangle
+// are zero, not leftovers from the earlier decode.
+func TestIntegrationDecodeGrayReusedDecoderClearsPartialCanvas(t *testing.T) {
+	whitePNG := encodeOpaqueWhitePNG(t)
+	partialGIF := encodePartialRedGIF(t)
+
+	reused := wuffs.New()
+	dst := image.NewGray(image.Rect(0, 0, 3, 3))
+	wantRect, wantStride, wantPix := dst.Rect, dst.Stride, unsafe.SliceData(dst.Pix)
+	if _, err := reused.DecodeGray(dst, whitePNG); err != nil {
+		t.Fatalf("DecodeGray(white PNG): %v", err)
+	}
+	reusedMeta, err := reused.DecodeGray(dst, partialGIF)
+	if err != nil {
+		t.Fatalf("reused DecodeGray(partial GIF): %v", err)
+	}
+
+	freshDst := image.NewGray(image.Rect(0, 0, 3, 3))
+	freshMeta, err := wuffs.New().DecodeGray(freshDst, partialGIF)
+	if err != nil {
+		t.Fatalf("fresh DecodeGray(partial GIF): %v", err)
+	}
+
+	if got := dst.GrayAt(0, 0); got != (color.Gray{}) {
+		t.Errorf("reused pixel (0,0) = %v, want zero gray", got)
+	}
+	wantRed := color.GrayModel.Convert(color.NRGBA{R: 0xFF, A: 0xFF}).(color.Gray)
+	if got := dst.GrayAt(1, 1); got != wantRed {
+		t.Errorf("reused pixel (1,1) = %v, want %v", got, wantRed)
+	}
+	if !bytes.Equal(dst.Pix, freshDst.Pix) {
+		t.Errorf("reused Pix = % X, want fresh Pix % X", dst.Pix, freshDst.Pix)
+	}
+	if dst.Rect != wantRect || dst.Stride != wantStride || unsafe.SliceData(dst.Pix) != wantPix {
+		t.Errorf("reused destination changed: Rect %v Stride %d, want Rect %v Stride %d and same Pix backing", dst.Rect, dst.Stride, wantRect, wantStride)
+	}
+	if *reusedMeta != *freshMeta {
+		t.Errorf("reused Meta = %+v, want fresh Meta %+v", *reusedMeta, *freshMeta)
+	}
 }
