@@ -19,7 +19,7 @@ func TestUnitMemoryLayout(t *testing.T) {
 
 		// A new decoder starts with exactly 32 MiB of guest linear memory
 		// from the generated module.
-		memSize := uint32(len(*d.module.Xmemory().Slice()))
+		memSize := uint32(len(*d.mem.Slice()))
 		if memSize != 32*1024*1024 {
 			t.Errorf("guest linear memory = %d bytes, want exactly %d (32 MiB)", memSize, 32*1024*1024)
 		}
@@ -93,12 +93,12 @@ func TestUnitMemoryLayout(t *testing.T) {
 		// Reserve with large values to trigger memory.Grow. The generated
 		// 32 MiB baseline cannot hold a 32 MiB dst slot plus a 2 MiB src
 		// slot above the 24 MiB floor, so this request grows memory.
-		beforeBytes := uint32(len(*d.module.Xmemory().Slice()))
+		beforeBytes := uint32(len(*d.mem.Slice()))
 		err := d.Reserve(32*1024*1024, 2*1024*1024)
 		if err != nil {
 			t.Fatalf("Reserve(32MiB, 2MiB) failed: %v", err)
 		}
-		afterBytes := uint32(len(*d.module.Xmemory().Slice()))
+		afterBytes := uint32(len(*d.mem.Slice()))
 		if afterBytes <= beforeBytes {
 			t.Errorf("Reserve did not grow guest linear memory: before %d, after %d", beforeBytes, afterBytes)
 		}

@@ -55,6 +55,7 @@ LDFLAGS=(
   -mexec-model=reactor
   -Wl,--no-entry
   -Wl,--gc-sections
+  -Wl,--import-memory
   -Wl,-z,stack-size=8388608
   -Wl,--initial-memory=33554432
   -Wl,--max-memory=268435456

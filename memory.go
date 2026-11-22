@@ -48,6 +48,8 @@ const (
 	// the generated module starts with 32 MiB of linear memory and the first
 	// 24 MiB stays reserved for guest static data, stack, and growth headroom,
 	// leaving the top 8 MiB for the default host slots.
+	// wasm/shim.c bounds the guest bump region by the same value (BUMP_END),
+	// so the two must change together.
 	hostSlotRegionBase = 0x01800000 // 24 MiB
 
 	// wasmPageSize is the wasm linear memory page size in bytes.
@@ -154,6 +156,9 @@ func computeLayout(memSize uint32, dstBytes, srcBytes uint32) slotLayout {
 // whose complete layout would exceed the module's 4096-page maximum, are
 // rejected with a non-nil error and leave all state unchanged.
 func (d *Decoder) Reserve(dstBytes, srcBytes int) error {
+	if d.closed {
+		return ErrClosed
+	}
 	cur := d.currentLayout
 
 	newDst, err := resolveSlot(cur.dstLen, dstBytes)
@@ -183,7 +188,7 @@ func (d *Decoder) Reserve(dstBytes, srcBytes int) error {
 
 	// Grow the host linear memory only if the required layout does not already
 	// fit within the current page count. Host growth uses the 4096-page limit.
-	mem := d.module.Xmemory()
+	mem := d.mem
 	currentBytes := uint32(len(*mem.Slice()))
 	pagesNeeded := (requiredMem + uint64(wasmPageSize) - 1) / uint64(wasmPageSize)
 	currentPages := uint64(currentBytes) / uint64(wasmPageSize)

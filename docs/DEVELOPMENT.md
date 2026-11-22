@@ -138,10 +138,11 @@ make generate                   # depends on wasm, runs:
 
 # Run the test suite.
 make test                       # no fuzz tag
-make test-all                   # -tags fuzz (Test* and Fuzz* seeds)
+make test-all                   # -tags "fuzz rss" (Test*, Fuzz* seeds, Linux RSS)
 make test-race                  # no fuzz tag
 make fuzz                       # -tags fuzz, mutation only (`-run=^$`)
-make lint                       # golangci-lint
+make lint                       # golangci-lint and clang-tidy on wasm/shim.c
+                                # (needs the sibling wuffs-mirror-release-c)
 make format-check               # check formatting without writing
 make format                     # apply formatting via treefmt
 ```
@@ -176,7 +177,7 @@ fuzzer.
 - `github.com/lbe/wuffs-wasm` (root package) is the consumer API: `wuffs.New`,
   `Decoder.Probe`, `Decoder.DecodeRGBA`, `Decoder.FrameCount`,
   `Decoder.LoopCount`, `Decoder.DecodeFrame`, `Decoder.Metadata`,
-  `Decoder.Reserve`, `Meta` /
+  `Decoder.Reserve`, `Decoder.Close`, `Decoder.Trim`, `Meta` /
   `FormatPNG` / `FormatWEBP`, and the exported error types. Intended call
   order is Probe → Reserve from `Meta.Stride*Meta.Height` → DecodeRGBA, or
   Probe → Reserve → FrameCount → LoopCount → DecodeFrame for animation.
@@ -206,6 +207,23 @@ fuzzer.
   the first 24 MiB stays reserved for guest static data, stack, and growth
   headroom. `Reserve` grows guest linear memory toward the 256 MiB
   generated maximum.
+- On 64-bit unix and Windows, guest memory is outside the Go heap
+  (`memory_guest.go`, `memory_unix.go`, `memory_windows.go`; `memory_other.go`
+  covers other platforms). Each decoder reserves 256 MiB of address space, pages
+  become resident only when written, and `Reserve` growth never copies. On 32-bit
+  and other platforms, guest memory is a Go slice that grows by copying.
+  `GOMEMLIMIT` and Go heap profiles do not count guest memory; measure it with RSS.
+- The wasm module imports its memory (`-Wl,--import-memory` in `wasm/build.sh`),
+  and the wuffs-wasm host supplies it. `Decoder.Trim` on Linux uses
+  `madvise(MADV_DONTNEED)` (`memory_trim_linux.go`); other unix uses a
+  `MAP_FIXED` anonymous remap (`memory_trim_unix.go`); Windows decommits and
+  recommits. The shim exports `wuffs_heap_base`, and a unit test requires it to
+  be at or below `0x900000` so `Trim` never releases static data.
+- `make test-all` also runs the Linux RSS integration tests (build tag `rss`).
+  Measured results: a new decoder adds under 4 MiB RSS (0.4 MiB); eight decoders
+  after 1024x1024 PNG decodes stay under 120 MiB (80 MiB, versus 416 MiB in
+  v0.5.0); a 2000x2000 decode followed by `Trim` returns RSS to within 2 MiB of
+  its value before the decode; `Close` frees the decoded pages.
 - The guest bump region (from `0x900000`) holds only decoder objects and
   metadata buffers, each capped at 4 MiB. The Wuffs work buffer, which scales
   with the image (a PNG needs about one decoded image), lives in the dst slot
@@ -230,6 +248,8 @@ flowchart LR
     DNG[DecodeNRGBA / DecodeGray]
     PR[Probe]
     RS[Reserve]
+    CL[Close]
+    TR[Trim]
   end
   subgraph guest [wasm shim.c]
     WFC[wuffs_frame_count]
@@ -244,6 +264,7 @@ flowchart LR
     BASE[32 MiB initial]
     FLOOR[24 MiB host-slot floor]
     MAX[256 MiB maximum]
+    OFF[off-heap reservation 256 MiB virtual]
   end
   PR --> WPR
   FC --> WFC
@@ -263,5 +284,8 @@ flowchart LR
   RS -.->|after Reserve| DR
   RS -.->|after Reserve| DNG
   RS -->|grows| MAX
+  CL -->|releases pages| OFF
+  CL -.->|later calls| ERRC[ErrClosed]
+  TR -->|returns pages above 9 MiB| OFF
   BASE --> FLOOR --> MAX
 ```

@@ -147,6 +147,9 @@ const minimumMetadataDstSlotBytes = 64 * 1024 // 64 KiB
 // the next successful Metadata call. EXIF, ICC, and XMP slices are fresh heap
 // copies safe to retain.
 func (d *Decoder) Metadata(src []byte) (*Metadata, error) {
+	if d.closed {
+		return nil, ErrClosed
+	}
 	if err := d.checkSrcCapacity(src); err != nil {
 		return nil, err
 	}
@@ -159,7 +162,7 @@ func (d *Decoder) Metadata(src []byte) (*Metadata, error) {
 	}
 
 	// Zero the pack header region at the dst scratch slot before the export.
-	mem := d.module.Xmemory()
+	mem := d.mem
 	memBytes := *mem.Slice()
 	if uint64(lay.dstOff)+metadataPackHeaderSize > uint64(len(memBytes)) {
 		return nil, ErrDecode
@@ -177,7 +180,7 @@ func (d *Decoder) Metadata(src []byte) (*Metadata, error) {
 	}
 
 	// Refresh memory view after guest call (guest may have grown memory).
-	memBytes = *d.module.Xmemory().Slice()
+	memBytes = *d.mem.Slice()
 	if uint64(lay.dstOff)+metadataPackHeaderSize > uint64(len(memBytes)) {
 		return nil, ErrDecode
 	}

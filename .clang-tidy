@@ -1,0 +1,18 @@
+# clang-tidy for wasm/shim.c (make lint). The included Wuffs release is not
+# linted: HeaderFilterRegex matches no included file.
+#
+# Disabled checks:
+# - bugprone-easily-swappable-parameters: the exports mirror a fixed ABI.
+# - bugprone-suspicious-include: shim.c includes the Wuffs .c release by design.
+# - clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling: it
+#   asks for memset_s/memcpy_s, which wasi-libc does not provide; sizes are
+#   checked explicitly at each call.
+Checks: >-
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-suspicious-include,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+WarningsAsErrors: "*"
+HeaderFilterRegex: "^$"

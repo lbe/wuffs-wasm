@@ -180,7 +180,7 @@ type memState struct {
 // slot layout for later comparison in assertMemUnchanged.
 func captureMemState(t *testing.T, d *Decoder) memState {
 	t.Helper()
-	slice := d.module.Xmemory().Slice()
+	slice := d.mem.Slice()
 	return memState{
 		ptr:    unsafe.Pointer(unsafe.SliceData(*slice)),
 		length: len(*slice),

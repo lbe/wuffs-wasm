@@ -130,7 +130,7 @@ func TestUnitPackageProbeMetaDetached(t *testing.T) {
 
 	// Mutate wasm memory in the meta slot region.
 	lay := d.currentLayout
-	memSlice := d.module.Xmemory().Slice()
+	memSlice := d.mem.Slice()
 	memBytes := *memSlice
 	if lay.metaOff+24 <= uint32(len(memBytes)) {
 		zeroSl := memBytes[lay.metaOff : lay.metaOff+24]

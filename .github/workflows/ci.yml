@@ -33,7 +33,16 @@ jobs:
       - name: Run format check
         run: make format-check
 
-      - name: Run golangci-lint
+      - name: Install clang-tidy
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy
+
+      # wasm/shim.c includes the Wuffs C release from a sibling checkout.
+      - name: Check out Wuffs C release
+        run: |
+          git clone https://github.com/lbe/wuffs-mirror-release-c.git "$GITHUB_WORKSPACE/../wuffs-mirror-release-c"
+          git -C "$GITHUB_WORKSPACE/../wuffs-mirror-release-c" checkout 7411f488fe2e2c205c3d3b3d28638b7356522930
+
+      - name: Run linters (golangci-lint, clang-tidy)
         run: make lint
 
       - name: Run tests (coverage)

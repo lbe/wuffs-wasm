@@ -69,7 +69,7 @@ type GuestMemoryState struct {
 // decoder's current slot layout. It exists only behind _test.go so it never
 // widens the production API.
 func CaptureGuestMemoryState(d *Decoder) GuestMemoryState {
-	memBytes := *d.module.Xmemory().Slice()
+	memBytes := *d.mem.Slice()
 	return GuestMemoryState{
 		MemoryBase:   unsafe.Pointer(unsafe.SliceData(memBytes)),
 		MemoryLen:    len(memBytes),

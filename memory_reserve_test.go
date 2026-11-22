@@ -20,9 +20,9 @@ func TestReserveGrowsOnlyRequestedSlotCapacity(t *testing.T) {
 		maxMemBytes = maxPages * wasmPageSize // 256 MiB
 	)
 
-	wasmLen := func(d *Decoder) int { return len(*d.module.Xmemory().Slice()) }
+	wasmLen := func(d *Decoder) int { return len(*d.mem.Slice()) }
 	wasmPtr := func(d *Decoder) uintptr {
-		s := d.module.Xmemory().Slice()
+		s := d.mem.Slice()
 		if len(*s) == 0 {
 			return 0
 		}

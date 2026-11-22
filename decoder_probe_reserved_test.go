@@ -87,7 +87,7 @@ func TestProbeHonorsReservedSourceCapacity(t *testing.T) {
 		src := make([]byte, reserved)
 		copy(src, base)
 
-		preSlice := d.module.Xmemory().Slice()
+		preSlice := d.mem.Slice()
 		prePtr := unsafe.Pointer(unsafe.SliceData(*preSlice))
 		preLen := len(*preSlice)
 		preLayout := d.currentLayout
@@ -110,7 +110,7 @@ func TestProbeHonorsReservedSourceCapacity(t *testing.T) {
 
 		// wasm memory identity must be preserved: Probe must not size slots
 		// internally and no guest must grow memory on the probe path.
-		postSlice := d.module.Xmemory().Slice()
+		postSlice := d.mem.Slice()
 		postPtr := unsafe.Pointer(unsafe.SliceData(*postSlice))
 		postLen := len(*postSlice)
 		postLayout := d.currentLayout
@@ -135,7 +135,7 @@ func TestProbeHonorsReservedSourceCapacity(t *testing.T) {
 		src := make([]byte, reserved+1)
 		copy(src, base)
 
-		preSlice := d.module.Xmemory().Slice()
+		preSlice := d.mem.Slice()
 		prePtr := unsafe.Pointer(unsafe.SliceData(*preSlice))
 		preLen := len(*preSlice)
 		preLayout := d.currentLayout
@@ -149,7 +149,7 @@ func TestProbeHonorsReservedSourceCapacity(t *testing.T) {
 		}
 
 		// The rejected call must not touch wasm memory or slot layout.
-		postSlice := d.module.Xmemory().Slice()
+		postSlice := d.mem.Slice()
 		postPtr := unsafe.Pointer(unsafe.SliceData(*postSlice))
 		postLen := len(*postSlice)
 		postLayout := d.currentLayout

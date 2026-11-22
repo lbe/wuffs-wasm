@@ -15,6 +15,14 @@
 // Stride*Height + WorkbufLen bytes of guest dst scratch, both reported by
 // Probe.
 //
+// On 64-bit unix and Windows, guest memory lives outside the Go heap: each
+// Decoder reserves 256 MiB of address space, and pages become resident only
+// when written. GOMEMLIMIT and Go heap profiles do not count it; measure it
+// with RSS. Close releases a Decoder's guest memory at once; a Decoder dropped
+// without Close is released when garbage collected. Trim returns the guest
+// pages above the stack and static data to the operating system, and the
+// Decoder stays usable with its current Reserve sizes.
+//
 // # Source capacity
 //
 // A new Decoder accepts sources up to 64 KiB until Reserve raises the src

@@ -8,20 +8,29 @@
 
 // ── Bump allocator ──────────────────────────────────────────────────────
 // Lives above the wasm stack [0, 0x800000) at 0x900000. Rewound at the
-// start of every wuffs_decode_image call so that repeated decodes reuse
+// start of every export that allocates, so that repeated calls reuse
 // the same region.
 static uint8_t* bump_ptr  = (uint8_t*)(uintptr_t)0x900000;
 static uint8_t* bump_base = (uint8_t*)(uintptr_t)0x900000;
 
 enum { BUMP_LIMIT = 4194304 };  // 4 MiB max per allocation
 
+// BUMP_END is the host-slot floor (hostSlotRegionBase in memory.go). Host
+// slots live at or above it, so the bump region must never reach it.
+enum { BUMP_END = 0x1800000 };  // 24 MiB
+
 static void bump_rewind(void) { bump_ptr = bump_base; }
 
+// bump_alloc returns size bytes, 8-byte aligned, or NULL when the allocation
+// would pass BUMP_END. It bounds the region itself rather than relying on
+// every caller's BUMP_LIMIT check.
 static uint8_t* bump_alloc(uint32_t size) {
-  // 8-byte align
-  size = (size + 7u) & ~7u;
+  uint64_t aligned = ((uint64_t)size + 7u) & ~(uint64_t)7u;
+  if ((uint64_t)(uintptr_t)bump_ptr + aligned > (uint64_t)BUMP_END) {
+    return NULL;
+  }
   uint8_t* p = bump_ptr;
-  bump_ptr += size;
+  bump_ptr += aligned;
   return p;
 }
 
@@ -416,14 +425,13 @@ static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off
     return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
   }
 
-  // Guard: reject decoders whose object exceeds bump limit.
-  if (slot->obj_size > BUMP_LIMIT) {
+  // Allocate the decoder from the bump region; reject an object over the
+  // bump limit or past the region end.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
     meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
   }
-
-  // Allocate decoder from bump region.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
   memset(dec, 0, slot->obj_size);
 
   wuffs_base__status status =
@@ -538,14 +546,13 @@ static int32_t probe_image(uint32_t src_off, uint32_t src_len,
     return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
   }
 
-  // Guard: reject decoders whose object exceeds bump limit.
-  if (slot->obj_size > BUMP_LIMIT) {
+  // Allocate the decoder from the bump region; reject an object over the
+  // bump limit or past the region end.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
     meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
   }
-
-  // Allocate decoder from bump region.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
   memset(dec, 0, slot->obj_size);
 
   wuffs_base__status status =
@@ -627,13 +634,12 @@ static int32_t frame_count(uint32_t src_off, uint32_t src_len,
     return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
   }
 
-  // Guard: reject decoders whose object exceeds bump limit.
-  if (slot->obj_size > BUMP_LIMIT) {
+  // Allocate the decoder from the bump region; reject an object over the
+  // bump limit or past the region end.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
     return WUFFS_WASM_ERR_DECODE;
   }
-
-  // Allocate decoder from bump region.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
   memset(dec, 0, slot->obj_size);
 
   wuffs_base__status status =
@@ -701,13 +707,12 @@ static int32_t animation_loops(uint32_t src_off, uint32_t src_len,
     return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
   }
 
-  // Guard: reject decoders whose object exceeds bump limit.
-  if (slot->obj_size > BUMP_LIMIT) {
+  // Allocate the decoder from the bump region; reject an object over the
+  // bump limit or past the region end.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
     return WUFFS_WASM_ERR_DECODE;
   }
-
-  // Allocate decoder from bump region.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
   memset(dec, 0, slot->obj_size);
 
   wuffs_base__status status =
@@ -801,15 +806,14 @@ static int32_t decode_frame(uint32_t src_off, uint32_t src_len,
     return WUFFS_WASM_ERR_UNKNOWN_FORMAT;
   }
 
-  // Guard: reject decoders whose object exceeds bump limit.
-  if (slot->obj_size > BUMP_LIMIT) {
+  // Allocate the decoder from the bump region; reject an object over the
+  // bump limit or past the region end.
+  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
     dec_meta->err = WUFFS_WASM_ERR_DECODE;
     frame_meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
   }
-
-  // Allocate decoder from bump region.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
   memset(dec, 0, slot->obj_size);
 
   wuffs_base__status status =
@@ -1020,11 +1024,18 @@ static int32_t read_image_metadata(uint32_t src_off, uint32_t src_len,
   // Allocate decoder object first, then the destination backing store and
   // the three temp blob buffers.
   void* dec = bump_alloc((uint32_t)slot->obj_size);
-  memset(dec, 0, slot->obj_size);
   uint8_t* have_ptr = bump_alloc(WUFFS_WASM_METADATA_HAVE_LEN);
   uint8_t* icc_buf = bump_alloc(WUFFS_WASM_METADATA_ICC_CAP);
   uint8_t* exif_buf = bump_alloc(src_len);
   uint8_t* xmp_buf = bump_alloc(src_len);
+  if (dec == NULL || have_ptr == NULL || icc_buf == NULL || exif_buf == NULL ||
+      xmp_buf == NULL) {
+    memset(hdr, 0, sizeof(*hdr));
+    hdr->err = WUFFS_WASM_ERR_DECODE;
+    hdr->format = fourcc;
+    return WUFFS_WASM_ERR_DECODE;
+  }
+  memset(dec, 0, slot->obj_size);
   uint32_t exif_len = 0;
   uint32_t icc_len = 0;
   uint32_t xmp_len = 0;
@@ -1155,7 +1166,7 @@ static int32_t read_image_metadata(uint32_t src_off, uint32_t src_len,
             memcpy(exif_buf + exif_len, src_ptr + r.min_incl, (size_t)n);
             exif_len += (uint32_t)n;
           } else if (mfourcc == WUFFS_BASE__FOURCC__ICCP) {
-            if ((uint64_t)icc_len + n > (uint64_t)src_len) {
+            if ((uint64_t)icc_len + n > (uint64_t)WUFFS_WASM_METADATA_ICC_CAP) {
               memset(hdr, 0, sizeof(*hdr));
               hdr->err = WUFFS_WASM_ERR_DECODE;
               hdr->format = fourcc;
@@ -1279,6 +1290,15 @@ wuffs_wasm_read_image_metadata(uint32_t src_off, uint32_t src_len,
 
 __attribute__((export_name("wuffs_version"))) uint32_t wuffs_wasm_version(void) {
   return (uint32_t)WUFFS_VERSION;
+}
+
+// wuffs_heap_base reports the end of the stack, static data, and BSS. The host
+// requires it to be at or below bump_base: Trim releases every page from
+// bump_base up, which is safe only when everything above it is per call.
+// __heap_base is defined by the linker, so its reserved name is required.
+extern unsigned char __heap_base;  // NOLINT(bugprone-reserved-identifier)
+__attribute__((export_name("wuffs_heap_base"))) uint32_t wuffs_wasm_heap_base(void) {
+  return (uint32_t)(uintptr_t)&__heap_base;
 }
 
 __attribute__((export_name("wuffs_decode_image"))) int32_t wuffs_wasm_decode_image(

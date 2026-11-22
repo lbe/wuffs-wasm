@@ -66,6 +66,7 @@ PNG remains first-frame-only still images, and WebP remains still-only
 
 ```go
 d := wuffs.New()
+defer d.Close()
 meta, err := d.Probe(src)
 if err != nil {
 	panic(err)
@@ -101,6 +102,7 @@ the default 64 KiB src cap before `Metadata`, same as for `Probe`.
 
 ```go
 d := wuffs.New()
+defer d.Close()
 if err := d.Reserve(65536, len(src)); err != nil {
 	panic(err)
 }
@@ -159,6 +161,7 @@ func main() {
 	}
 
 	d := wuffs.New()
+	defer d.Close()
 
 	// 1. Probe reports dimensions/format without decoding pixels.
 	meta, err := d.Probe(pngSrc)
@@ -338,6 +341,8 @@ cfg, err := image.DecodeConfig(f)
 | `(*Decoder) DecodeFrame(dst, src, index)`                                                                                                                                            | Decode one animation frame into the overall canvas; returns `*Frame`.                                                                                                                                                                   |
 | `(*Decoder) Metadata(src)`                                                                                                                                                           | Opt-in EXIF/ICC/XMP/gamma/chromaticities/sRGB/modification time; no pixels.                                                                                                                                                             |
 | `(*Decoder) Reserve(dstBytes, srcBytes)`                                                                                                                                             | Grow wasm src/dst slots before Probe, decode, animation, or metadata.                                                                                                                                                                   |
+| `(*Decoder) Close()`                                                                                                                                                                 | Release guest memory immediately; later error-returning calls return `ErrClosed`.                                                                                                                                                       |
+| `(*Decoder) Trim()`                                                                                                                                                                  | Return unused guest pages above the stack and static data to the OS; the decoder stays usable.                                                                                                                                          |
 | `(*Decoder) Version()` / `VersionNum()`                                                                                                                                              | Embedded Wuffs library version.                                                                                                                                                                                                         |
 | `Frame`, `Disposal`                                                                                                                                                                  | Per-frame bounds, duration, disposal, blend, and background for `DecodeFrame`. Duration is truncated to whole nanoseconds; one outside `time.Duration` makes `DecodeFrame` return `ErrDecode`.                                          |
 | `Metadata`, `Chromaticities`                                                                                                                                                         | Metadata payload and parsed chromaticities from `Metadata`.                                                                                                                                                                             |
@@ -345,12 +350,15 @@ cfg, err := image.DecodeConfig(f)
 | `Meta`, `FormatPNG`, `FormatWEBP`, `FormatBMP`, `FormatGIF`, `FormatJPEG`, `FormatNPBM`, `FormatQOI`, `FormatTGA`, `FormatWBMP`, `FormatETC2`, `FormatHNSM`, `FormatNIE`, `FormatTH` | Image config from `Probe`/decode; image format FourCC constants.                                                                                                                                                                        |
 | `ErrUnknownFormat`, `ErrSrcTooLarge`, `ErrDecode`                                                                                                                                    | Sentinel errors.                                                                                                                                                                                                                        |
 | `ErrBadImage`                                                                                                                                                                        | `dst` Rect/Stride/Pix do not match the decoded image (empty/nil/size mismatch).                                                                                                                                                         |
+| `ErrClosed`                                                                                                                                                                          | Returned by `Decoder` error-returning methods after `Close`.                                                                                                                                                                            |
 | `ErrDstTooSmall`                                                                                                                                                                     | Sentinel for a destination too small (host layout or guest scratch).                                                                                                                                                                    |
 | `*DstTooSmallError`                                                                                                                                                                  | Structured error with required buffer size and image dimensions; matches `ErrDstTooSmall`.                                                                                                                                              |
 
 A `Decoder` remains single-goroutine: it is not safe for concurrent use. Use one decoder per goroutine, or serialize access.
 
 `New` starts with 32 MiB of guest linear memory. `Reserve` grows that memory up to the 256 MiB generated maximum.
+
+On 64-bit unix and Windows, guest memory lives outside the Go heap. Each `Decoder` reserves 256 MiB of address space, and pages become resident only when written, so `GOMEMLIMIT` and Go heap profiles do not count it; measure it with RSS. `Close` releases a decoder's guest memory at once, and `Trim` returns unused guest pages to the OS after a large decode while the decoder stays usable.
 
 ## Performance
 

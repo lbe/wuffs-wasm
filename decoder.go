@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"runtime"
 	"time"
 
 	wasihost "github.com/lbe/wasm2go-wasi-host"
@@ -25,6 +26,9 @@ import (
 // A Decoder is not safe for concurrent use.
 type Decoder struct {
 	module        *wuffswasm.Module
+	mem           guestMemory
+	cleanup       runtime.Cleanup // releases mem if the Decoder is dropped without Close
+	closed        bool
 	wasi          *wasihost.State
 	currentLayout slotLayout
 	lastMeta      Meta     // reused Meta return value to avoid per-decode allocation; returned pointer aliases this field
@@ -43,18 +47,54 @@ const (
 
 // New constructs a Decoder with default guest scratch: 128 KiB dst slot and
 // 64 KiB src capacity (raise both with Reserve before large inputs).
+//
+// The guest memory lives outside the Go heap on 64-bit unix and Windows:
+// New reserves 256 MiB of address space, and only pages the decoder writes
+// become resident. Call Close to release it at once; a Decoder dropped
+// without Close releases it when garbage collected.
 func New() *Decoder {
-	var module *wuffswasm.Module
-	wasi := newWASIState(&module)
-	module = wuffswasm.New(wasi)
+	mem := newGuestMemory()
+	// The generated New writes static data into memory, so the memory must
+	// already have its initial size.
+	if mem.Grow(initialMemoryBytes/wasmPageSize, maxReservePages) < 0 {
+		panic("wuffs: cannot allocate guest memory")
+	}
+	wasi := newWASIState(mem)
+	module := wuffswasm.New(guestEnv{mem: mem}, wasi)
 	module.X_initialize()
-	mem := module.Xmemory()
 	memSize := uint32(len(*mem.Slice()))
-	return &Decoder{
+	d := &Decoder{
 		module:        module,
+		mem:           mem,
 		wasi:          wasi,
 		currentLayout: computeLayout(memSize, uint32(initialDstSlotBytes), uint32(defaultSrcCap)),
 	}
+	d.cleanup = runtime.AddCleanup(d, func(m guestMemory) { _ = m.release() }, mem) //nolint:errcheck // no caller to report to
+	return d
+}
+
+// Close releases the Decoder's guest memory. Afterwards every method that
+// returns an error returns ErrClosed, Trim does nothing, and Version and
+// VersionNum keep working. Closing an already closed Decoder returns nil.
+func (d *Decoder) Close() error {
+	if d.closed {
+		return nil
+	}
+	d.closed = true
+	d.cleanup.Stop()
+	return d.mem.release()
+}
+
+// Trim returns the guest pages above the stack and static data to the
+// operating system, keeping the Decoder usable with its current Reserve
+// sizes. Call it after a large decode to drop resident memory while keeping
+// the Decoder. It is a no-op on a closed Decoder and on platforms where guest
+// memory is a Go slice.
+func (d *Decoder) Trim() {
+	if d.closed {
+		return
+	}
+	d.mem.trim(bumpBase)
 }
 
 // Version returns the embedded Wuffs library version as a "major.minor.patch" string.
@@ -106,6 +146,9 @@ func (d *Decoder) checkSrcCapacity(src []byte) error {
 //
 // The returned Meta carries the decoded image dimensions and pixel format.
 func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
+	if d.closed {
+		return nil, ErrClosed
+	}
 	// DecodeRGBA is DecodeFrame(dst, src, 0) without the *Frame value:
 	// frame 0 of a still image is the full canvas, so the indexed decode
 	// writes the same pixels and populates the same lastMeta. The *Frame
@@ -140,6 +183,9 @@ func (d *Decoder) DecodeRGBA(dst *image.RGBA, src []byte) (*Meta, error) {
 //
 // The returned Meta carries the decoded image dimensions and pixel format.
 func (d *Decoder) DecodeNRGBA(dst *image.NRGBA, src []byte) (*Meta, error) {
+	if d.closed {
+		return nil, ErrClosed
+	}
 	// Keep the pointer check ahead of all destination field access and decoding.
 	if dst == nil {
 		return nil, ErrBadImage
@@ -179,6 +225,9 @@ func (d *Decoder) DecodeNRGBA(dst *image.NRGBA, src []byte) (*Meta, error) {
 //
 // The returned Meta carries the decoded image dimensions and pixel format.
 func (d *Decoder) DecodeGray(dst *image.Gray, src []byte) (*Meta, error) {
+	if d.closed {
+		return nil, ErrClosed
+	}
 	// Keep the pointer check ahead of all destination field access and decoding.
 	if dst == nil {
 		return nil, ErrBadImage
@@ -235,7 +284,7 @@ func (d *Decoder) decodeImage(src []byte, dstPixfmt int32) (slotLayout, Meta, []
 	if ret != 0 {
 		err := errFromGuestReturn(ret)
 		if ret == guestErrDstTooSmall {
-			decMeta := readMeta(*d.module.Xmemory().Slice(), lay.metaOff)
+			decMeta := readMeta(*d.mem.Slice(), lay.metaOff)
 			var dts *DstTooSmallError
 			if errors.As(err, &dts) {
 				dts.MinBytes = guestDstBytes(decMeta)
@@ -247,7 +296,7 @@ func (d *Decoder) decodeImage(src []byte, dstPixfmt int32) (slotLayout, Meta, []
 		return slotLayout{}, Meta{}, nil, err
 	}
 
-	memBytes := *d.module.Xmemory().Slice()
+	memBytes := *d.mem.Slice()
 	return lay, readMeta(memBytes, lay.metaOff), memBytes, nil
 }
 
@@ -311,6 +360,9 @@ func decodedScratch(memBytes []byte, lay slotLayout, width, height int) ([]byte,
 // Reserve. Callers grow the src slot with Reserve before probing a source
 // larger than the default capacity.
 func (d *Decoder) Probe(src []byte) (*Meta, error) {
+	if d.closed {
+		return nil, ErrClosed
+	}
 	if err := d.checkSrcCapacity(src); err != nil {
 		return nil, err
 	}
@@ -334,7 +386,7 @@ func (d *Decoder) Probe(src []byte) (*Meta, error) {
 	}
 
 	// Refresh memory view after guest call (guest may have grown memory).
-	memBytes := *d.module.Xmemory().Slice()
+	memBytes := *d.mem.Slice()
 
 	// Read decoded metadata from the guest meta slot.
 	decMeta := readMeta(memBytes, lay.metaOff)
@@ -348,6 +400,9 @@ func (d *Decoder) Probe(src []byte) (*Meta, error) {
 // capacity returns ErrSrcTooLarge before any guest call, and empty src
 // returns ErrDecode. FrameCount never calls memory.Grow or Reserve.
 func (d *Decoder) FrameCount(src []byte) (int, error) {
+	if d.closed {
+		return 0, ErrClosed
+	}
 	if err := d.checkSrcCapacity(src); err != nil {
 		return 0, err
 	}
@@ -356,7 +411,7 @@ func (d *Decoder) FrameCount(src []byte) (int, error) {
 	d.copySrcToSlot(lay, src)
 
 	// Zero the count-out scratch slot before the export.
-	mem := d.module.Xmemory()
+	mem := d.mem
 	memBytes := *mem.Slice()
 	binary.LittleEndian.PutUint32(memBytes[lay.countOutOff:lay.countOutOff+4], 0)
 
@@ -369,7 +424,7 @@ func (d *Decoder) FrameCount(src []byte) (int, error) {
 	}
 
 	// Refresh memory view after guest call (guest may have grown memory).
-	memBytes = *d.module.Xmemory().Slice()
+	memBytes = *d.mem.Slice()
 	n := int(int32(binary.LittleEndian.Uint32(memBytes[lay.countOutOff : lay.countOutOff+4])))
 	if n <= 0 {
 		return 0, ErrDecode
@@ -383,6 +438,9 @@ func (d *Decoder) FrameCount(src []byte) (int, error) {
 // returns ErrSrcTooLarge before any guest call, and empty src returns
 // ErrDecode. LoopCount never calls memory.Grow or Reserve.
 func (d *Decoder) LoopCount(src []byte) (uint32, error) {
+	if d.closed {
+		return 0, ErrClosed
+	}
 	if err := d.checkSrcCapacity(src); err != nil {
 		return 0, err
 	}
@@ -391,7 +449,7 @@ func (d *Decoder) LoopCount(src []byte) (uint32, error) {
 	d.copySrcToSlot(lay, src)
 
 	// Zero the loops-out scratch slot before the export.
-	mem := d.module.Xmemory()
+	mem := d.mem
 	memBytes := *mem.Slice()
 	binary.LittleEndian.PutUint32(memBytes[lay.loopsOutOff:lay.loopsOutOff+4], 0)
 
@@ -404,7 +462,7 @@ func (d *Decoder) LoopCount(src []byte) (uint32, error) {
 	}
 
 	// Refresh memory view after guest call (guest may have grown memory).
-	memBytes = *d.module.Xmemory().Slice()
+	memBytes = *d.mem.Slice()
 	return binary.LittleEndian.Uint32(memBytes[lay.loopsOutOff : lay.loopsOutOff+4]), nil
 }
 
@@ -480,6 +538,9 @@ func flicksToDuration(flicks uint64) (time.Duration, error) {
 // and the returned *Frame aliases the reusable lastFrame. DecodeFrame
 // never calls memory.Grow or Reserve.
 func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, error) {
+	if d.closed {
+		return nil, ErrClosed
+	}
 	// Keep the pointer check ahead of all destination field access and decoding.
 	if dst == nil {
 		return nil, ErrBadImage
@@ -495,7 +556,7 @@ func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, e
 	d.copySrcToSlot(lay, src)
 
 	// Zero the decode-meta and frame-meta scratch slots before the export.
-	mem := d.module.Xmemory()
+	mem := d.mem
 	memBytes := *mem.Slice()
 	for i := uint32(0); i < uint32(metaSlotBytes); i++ {
 		memBytes[lay.metaOff+i] = 0
@@ -514,7 +575,7 @@ func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, e
 	if ret != 0 {
 		err := errFromGuestReturn(ret)
 		if ret == guestErrDstTooSmall {
-			memBytes = *d.module.Xmemory().Slice()
+			memBytes = *d.mem.Slice()
 			decMeta := readMeta(memBytes, lay.metaOff)
 			var dts *DstTooSmallError
 			if errors.As(err, &dts) {
@@ -528,7 +589,7 @@ func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, e
 	}
 
 	// Refresh memory view after guest call (guest may have grown memory).
-	memBytes = *d.module.Xmemory().Slice()
+	memBytes = *d.mem.Slice()
 	decMeta := readMeta(memBytes, lay.metaOff)
 	width := int(decMeta.Width)
 	height := int(decMeta.Height)
@@ -558,7 +619,7 @@ func (d *Decoder) DecodeFrame(dst *image.RGBA, src []byte, index int) (*Frame, e
 // ensure len(src) <= the reserved src-slot capacity. The wasm memory view is
 // refreshed so the copy targets the live backing slice.
 func (d *Decoder) copySrcToSlot(lay slotLayout, src []byte) {
-	mem := d.module.Xmemory()
+	mem := d.mem
 	memBytes := *mem.Slice()
 	copy(memBytes[lay.srcOff:lay.srcOff+uint32(len(src))], src)
 }

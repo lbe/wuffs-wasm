@@ -17,7 +17,8 @@ below) without allocating or replacing `Pix`.
 - No CGO. Consumer types live in the root package.
 - Hot path takes `[]byte` source, not `io.Reader`.
 - `New()` starts with 32 MiB of guest linear memory. Guest memory grows
-  with `Reserve` up to the 256 MiB generated maximum.
+  with `Reserve` up to the 256 MiB generated maximum. On 64-bit unix and
+  Windows that memory lives outside the Go heap (see Decoder).
 - Wuffs rejects width or height above `0xFFFFFF` (16_777_215). This package
   does the same.
 - A `Decoder` remains single-goroutine: it is not safe for concurrent use.
@@ -48,6 +49,9 @@ meta, err = d.DecodeRGBA(dst, src)
 - Reuse `d` and `dst` for further decodes of the same size. After `Reserve` and
   with `dst` already sized, `DecodeRGBA` / `Probe` allocate zero Go heap
   objects on success.
+- Call `Close` when the `Decoder` is no longer needed to release its guest
+  memory at once. A `Decoder` dropped without `Close` is released by the
+  garbage collector.
 
 Guest decode still uses a wasm pixel slot (scratch). Host `Pix` is the product
 buffer. `Reserve` sizes the guest slot, not the Go image.
@@ -179,6 +183,7 @@ var (
     ErrDecode        error // decode/probe failed (corrupt, truncated payload, bad args)
     ErrDstTooSmall   error // sentinel; also *DstTooSmallError
     ErrBadImage      error // dst Rect/Stride/Pix do not match the decoded image
+    ErrClosed        error // decoder was closed by Close
 )
 ```
 
@@ -197,6 +202,8 @@ func New() *Decoder
 
 func (d *Decoder) Version() string    // "major.minor.patch"
 func (d *Decoder) VersionNum() int32  // major<<16 | minor<<8 | patch
+func (d *Decoder) Close() error       // release guest memory; see Close
+func (d *Decoder) Trim()              // return unused guest pages to the OS
 ```
 
 ### Probe
@@ -232,6 +239,40 @@ This is the only intended allocation point besides `New()`.
 what `Reserve` (or `New` defaults) already provided. Insufficient guest dst
 slot → `*DstTooSmallError` with dimensions filled in and `MinBytes` equal to
 `Stride*Height + WorkbufLen`; `Reserve(int(e.MinBytes), len(src))` and retry.
+
+### Memory
+
+On 64-bit unix and Windows, each `Decoder` reserves 256 MiB of address space
+outside the Go heap. Only the virtual size is reserved; pages become resident
+when written. `Reserve` growth never copies guest memory. Consequently
+`GOMEMLIMIT` and Go heap profiles do not count guest memory; measure it with
+RSS. On 32-bit and other platforms, guest memory is a Go slice that grows by
+copying.
+
+### Close
+
+```go
+func (d *Decoder) Close() error
+```
+
+Releases the decoder's guest memory immediately. `Close` matches `io.Closer`:
+closing an already closed `Decoder` returns nil. After `Close`, every method
+with an error result (`Reserve`, `Probe`, `DecodeRGBA`, `DecodeNRGBA`,
+`DecodeGray`, `FrameCount`, `LoopCount`, `DecodeFrame`, `Metadata`) returns
+`ErrClosed`. `Version` and `VersionNum` keep working, and `Trim` does nothing.
+
+### Trim
+
+```go
+func (d *Decoder) Trim()
+```
+
+Returns the guest pages above the guest stack and static data (from 9 MiB, the
+bump region base `0x900000`, to the end of guest memory) to the operating
+system. The `Decoder` stays usable with its current `Reserve` sizes; no new
+`Reserve` is needed. Use `Trim` after a large decode to drop resident memory
+while keeping the decoder. It is a no-op on a closed `Decoder` and on platforms
+where guest memory is a Go slice.
 
 ### Decode still image / frame 0
 

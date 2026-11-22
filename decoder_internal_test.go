@@ -53,7 +53,7 @@ func TestIntegrationSourceSlotDefinesDecoderCapacity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Capture the full slot layout, wasm byte length, and backing
 			// pointer before the rejected call.
-			preSlice := d.module.Xmemory().Slice()
+			preSlice := d.mem.Slice()
 			preLen := len(*preSlice)
 			prePtr := unsafe.Pointer(&(*preSlice)[0])
 			preLayout := d.currentLayout
@@ -68,7 +68,7 @@ func TestIntegrationSourceSlotDefinesDecoderCapacity(t *testing.T) {
 
 			// The rejection must not mutate wasm memory: the slot layout, the
 			// wasm byte length, and the backing slice pointer must be identical.
-			postSlice := d.module.Xmemory().Slice()
+			postSlice := d.mem.Slice()
 			postLen := len(*postSlice)
 			postPtr := unsafe.Pointer(&(*postSlice)[0])
 			postLayout := d.currentLayout
@@ -114,7 +114,7 @@ func TestIntegrationSourceCapacityUsesCurrentLayout(t *testing.T) {
 
 		// Capture the full slot layout, wasm byte length, and backing pointer
 		// before the rejected call.
-		preSlice := d.module.Xmemory().Slice()
+		preSlice := d.mem.Slice()
 		preLen := len(*preSlice)
 		prePtr := unsafe.Pointer(unsafe.SliceData(*preSlice))
 		preLayout := d.currentLayout
@@ -132,7 +132,7 @@ func TestIntegrationSourceCapacityUsesCurrentLayout(t *testing.T) {
 		}
 
 		// The rejection must not mutate wasm memory.
-		postSlice := d.module.Xmemory().Slice()
+		postSlice := d.mem.Slice()
 		postLen := len(*postSlice)
 		postPtr := unsafe.Pointer(unsafe.SliceData(*postSlice))
 		postLayout := d.currentLayout

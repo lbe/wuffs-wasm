@@ -34,6 +34,9 @@ var (
 	// src-slot capacity configured via Reserve.
 	ErrSrcTooLarge = fmt.Errorf("wuffs: source data too large for src slot")
 
+	// ErrClosed is returned by Decoder methods called after Close.
+	ErrClosed = fmt.Errorf("wuffs: decoder is closed")
+
 	// ErrDecode is returned on general decode failures, including zero
 	// src_len or bad meta_off values, and from DecodeFrame when a frame
 	// duration does not fit time.Duration.

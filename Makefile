@@ -14,9 +14,9 @@ help:
 	@echo "  make format        - Format everything via treefmt (gofmt, goimports, dprint, shfmt)"
 	@echo "  make format-check  - Check formatting without writing"
 	@echo "  make generate      - Rebuild wasm and regenerate Go bindings"
-	@echo "  make lint          - Run golangci-lint"
+	@echo "  make lint          - Run golangci-lint and clang-tidy (wasm/shim.c)"
 	@echo "  make test          - Run tests for $(PKG) (no fuzz tag)"
-	@echo "  make test-all      - Run tests and Fuzz* seeds (-tags fuzz)"
+	@echo "  make test-all      - Run tests, Fuzz* seeds, and Linux RSS tests (-tags 'fuzz rss')"
 	@echo "  make test-race     - Run tests with race detector (no fuzz tag)"
 	@echo "  make fuzz          - Run native Go fuzz mutation (-tags fuzz, no Test*)"
 	@echo "  make bench-fixtures - Download M/L benchmark fixtures (network)"
@@ -47,7 +47,7 @@ test:
 
 .PHONY: test-all
 test-all:
-	time go test $(PKG) -tags fuzz $(ARGS)
+	time go test $(PKG) -tags "fuzz rss" $(ARGS)
 
 .PHONY: test-race
 test-race:
@@ -63,10 +63,17 @@ FUZZTIME ?= 30s
 fuzz:
 	time go test -tags fuzz -run=^$$ -fuzz=$(FUZZ) -fuzztime=$(FUZZTIME) -parallel=4 .
 
+# wasm/shim.c includes the Wuffs C release from a sibling checkout.
+WUFFS_RELEASE_C ?= ../wuffs-mirror-release-c/release/c/wuffs-v0.4.c
+
 .PHONY: lint
 lint:
 	# Run golangci-lint across all packages
 	golangci-lint run --max-same-issues 0 ./...
+	# Run clang-tidy on wasm/shim.c (checks in .clang-tidy). It parses for the
+	# host target, so it needs no wasi-sdk.
+	@test -f $(WUFFS_RELEASE_C) || { echo "lint: missing $(WUFFS_RELEASE_C); check out wuffs-mirror-release-c beside this repository"; exit 1; }
+	clang-tidy --quiet wasm/shim.c -- -I wasm -std=c11
 
 .PHONY: cover
 cover:

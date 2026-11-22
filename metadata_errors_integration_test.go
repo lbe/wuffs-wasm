@@ -97,7 +97,7 @@ func TestIntegrationMetadataDoesNotAliasWasm(t *testing.T) {
 
 	// Mutate the wasm pack region (header + EXIF blob) at the dst scratch slot.
 	lay := d.currentLayout
-	memBytes := *d.module.Xmemory().Slice()
+	memBytes := *d.mem.Slice()
 	end := lay.dstOff + metadataPackHeaderSize + uint32(len(md.EXIF))
 	if uint64(end) > uint64(len(memBytes)) {
 		t.Fatalf("pack region end %d exceeds wasm memory len %d", end, len(memBytes))
