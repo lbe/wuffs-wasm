@@ -4,11 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WASM_DIR="$ROOT/wasm"
 BUILD_DIR="$WASM_DIR/build"
-WASI_VERSION="33.0"
-WASI_ARCH="x86_64"
-WASI_SDK="$ROOT/tools/wasi-sdk-${WASI_VERSION}-${WASI_ARCH}-linux"
-WASI_TAR="wasi-sdk-${WASI_VERSION}-${WASI_ARCH}-linux.tar.gz"
-WASI_URL="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/${WASI_TAR}"
 
 PROFILE="${1:-perf}"
 case "$PROFILE" in
@@ -20,14 +15,7 @@ size) CLANG_OPT=(-Oz -flto) WASM_OPT_LEVEL=-Oz ;;
   ;;
 esac
 
-if [[ ! -x "$WASI_SDK/bin/clang" ]]; then
-  mkdir -p "$ROOT/tools"
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
-  echo "downloading ${WASI_URL}" >&2
-  curl -fsSL "$WASI_URL" -o "$tmp/$WASI_TAR"
-  tar -C "$ROOT/tools" -xf "$tmp/$WASI_TAR"
-fi
+WASI_SDK="$("$WASM_DIR/wasi-sdk.sh")"
 
 CC="$WASI_SDK/bin/clang"
 SYSROOT="$WASI_SDK/share/wasi-sysroot"

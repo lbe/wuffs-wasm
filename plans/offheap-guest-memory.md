@@ -201,13 +201,23 @@ linted, as part of the single `make lint` target (no separate target).
   `clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling`
   (wasi-libc has no `memset_s`/`memcpy_s`; sizes are checked explicitly).
 - `make lint` runs golangci-lint, checks that the sibling
-  `wuffs-mirror-release-c` checkout exists, then runs
-  `clang-tidy --quiet wasm/shim.c -- -I wasm -std=c11`. It parses for the host
-  target, so it needs no wasi-sdk.
+  `wuffs-mirror-release-c` checkout exists, then runs the clang-tidy bundled
+  with the pinned wasi-sdk (`wasm/wasi-sdk.sh`, shared with `wasm/build.sh`)
+  for the wasm32 target with `-DWUFFS_WASM_LINT`.
+- `WUFFS_WASM_LINT` stops `wasm/wuffs_config.h` defining
+  `WUFFS_IMPLEMENTATION`, so lint parses only Wuffs declarations and the
+  analyzer cannot follow calls into the Wuffs release. The decoder table uses
+  the public `sizeof__wuffs_*__decoder` functions instead of `sizeof(TYPE)`,
+  because C Wuffs defines decoder structs only with the implementation.
+- Why: the first CI run (clang-tidy 21 from apt) reported
+  `clang-analyzer-security.ArrayBound` inside the Wuffs vtable loop, reached
+  from shim.c calls; local clang-tidy 19 lacked that check. Pinning one
+  clang-tidy and parsing declarations only makes lint deterministic and
+  limits it to shim.c.
 - The one finding, `__heap_base` as a reserved identifier, is required by the
   linker and suppressed inline with `NOLINT(bugprone-reserved-identifier)`.
   Removing the suppression makes `make lint` fail.
-- CI installs `clang-tidy` and clones `lbe/wuffs-mirror-release-c` read-only
+- CI caches `tools/wasi-sdk-*` (keyed on `wasm/wasi-sdk.sh`) and clones `lbe/wuffs-mirror-release-c` read-only
   at `7411f488fe2e2c205c3d3b3d28638b7356522930` beside the workspace, then
   runs `make lint`.
 - `docs/DEVELOPMENT.md` documents what `make lint` runs.

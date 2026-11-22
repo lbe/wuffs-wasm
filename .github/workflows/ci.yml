@@ -33,8 +33,13 @@ jobs:
       - name: Run format check
         run: make format-check
 
-      - name: Install clang-tidy
-        run: sudo apt-get update && sudo apt-get install -y clang-tidy
+      # make lint runs clang-tidy from the wasi-sdk pinned in wasm/wasi-sdk.sh
+      # (downloaded on a cache miss), so CI and local lint use one LLVM release.
+      - name: Cache wasi-sdk
+        uses: actions/cache@v4
+        with:
+          path: tools/wasi-sdk-*
+          key: wasi-sdk-${{ runner.os }}-${{ hashFiles('wasm/wasi-sdk.sh') }}
 
       # wasm/shim.c includes the Wuffs C release from a sibling checkout.
       - name: Check out Wuffs C release

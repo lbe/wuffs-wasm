@@ -70,10 +70,13 @@ WUFFS_RELEASE_C ?= ../wuffs-mirror-release-c/release/c/wuffs-v0.4.c
 lint:
 	# Run golangci-lint across all packages
 	golangci-lint run --max-same-issues 0 ./...
-	# Run clang-tidy on wasm/shim.c (checks in .clang-tidy). It parses for the
-	# host target, so it needs no wasi-sdk.
+	# Run clang-tidy on wasm/shim.c (checks in .clang-tidy) with the pinned
+	# wasi-sdk, for the wasm32 target. WUFFS_WASM_LINT parses Wuffs declarations
+	# only, so the analyzer never reports inside the Wuffs release.
 	@test -f $(WUFFS_RELEASE_C) || { echo "lint: missing $(WUFFS_RELEASE_C); check out wuffs-mirror-release-c beside this repository"; exit 1; }
-	clang-tidy --quiet wasm/shim.c -- -I wasm -std=c11
+	@sdk="$$(bash wasm/wasi-sdk.sh)" && set -x && \
+		"$$sdk/bin/clang-tidy" --quiet wasm/shim.c -- --target=wasm32-wasip1 \
+		--sysroot="$$sdk/share/wasi-sysroot" -I wasm -std=c11 -DWUFFS_WASM_LINT
 
 .PHONY: cover
 cover:

@@ -2,7 +2,11 @@
 #ifndef WUFFS_WASM_CONFIG_H
 #define WUFFS_WASM_CONFIG_H
 
+// make lint defines WUFFS_WASM_LINT so clang-tidy sees only Wuffs declarations
+// and analyzes wasm/shim.c, never the Wuffs implementation.
+#ifndef WUFFS_WASM_LINT
 #define WUFFS_IMPLEMENTATION
+#endif
 #define WUFFS_CONFIG__STATIC_FUNCTIONS
 #define WUFFS_CONFIG__AVOID_CPU_ARCH
 

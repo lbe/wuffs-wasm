@@ -1,5 +1,6 @@
-# clang-tidy for wasm/shim.c (make lint). The included Wuffs release is not
-# linted: HeaderFilterRegex matches no included file.
+# clang-tidy for wasm/shim.c (make lint). make lint defines WUFFS_WASM_LINT, so
+# only Wuffs declarations are parsed and the analyzer cannot follow calls into
+# the Wuffs release; HeaderFilterRegex also matches no included file.
 #
 # Disabled checks:
 # - bugprone-easily-swappable-parameters: the exports mirror a fixed ABI.

@@ -142,7 +142,9 @@ make test-all                   # -tags "fuzz rss" (Test*, Fuzz* seeds, Linux RS
 make test-race                  # no fuzz tag
 make fuzz                       # -tags fuzz, mutation only (`-run=^$`)
 make lint                       # golangci-lint and clang-tidy on wasm/shim.c
-                                # (needs the sibling wuffs-mirror-release-c)
+                                # (pinned wasi-sdk clang-tidy, fetched by
+                                # wasm/wasi-sdk.sh; needs the sibling
+                                # wuffs-mirror-release-c)
 make format-check               # check formatting without writing
 make format                     # apply formatting via treefmt
 ```

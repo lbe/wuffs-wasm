@@ -361,9 +361,12 @@ static uint32_t sniff_fourcc(const uint8_t* src, uint32_t len) {
   return 0;
 }
 
+// obj_size is the Wuffs sizeof__ function rather than sizeof(TYPE): in C, Wuffs
+// defines decoder structs only with WUFFS_IMPLEMENTATION, and make lint parses
+// shim.c against Wuffs declarations alone.
 typedef struct wuffs_wasm_decoder_slot {
   uint32_t fourcc;
-  size_t obj_size;
+  size_t (*obj_size)(void);
   wuffs_base__status (*init)(void* self, size_t self_size, uint64_t wuffs_version,
                              uint32_t initialize_flags);
   wuffs_base__image_decoder* (*upcast)(void* self);
@@ -371,7 +374,7 @@ typedef struct wuffs_wasm_decoder_slot {
 
 #define WUFFS_WASM_DECODER_SLOT(NAME, TYPE)                         \
   {                                                                 \
-      WUFFS_BASE__FOURCC__##NAME, sizeof(TYPE),                     \
+      WUFFS_BASE__FOURCC__##NAME, sizeof__##TYPE,                   \
           (wuffs_base__status(*)(void*, size_t, uint64_t, uint32_t)) \
               TYPE##__initialize,                                   \
           (wuffs_base__image_decoder * (*)(void*))                   \
@@ -427,15 +430,15 @@ static int32_t decode_image(uint32_t src_off, uint32_t src_len, uint32_t dst_off
 
   // Allocate the decoder from the bump region; reject an object over the
   // bump limit or past the region end.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
-  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
+  void* dec = bump_alloc((uint32_t)slot->obj_size());
+  if (slot->obj_size() > BUMP_LIMIT || dec == NULL) {
     meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
   }
-  memset(dec, 0, slot->obj_size);
+  memset(dec, 0, slot->obj_size());
 
   wuffs_base__status status =
-      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+      slot->init(dec, slot->obj_size(), WUFFS_VERSION, 0);
   if (status.repr != NULL) {
     meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
@@ -548,15 +551,15 @@ static int32_t probe_image(uint32_t src_off, uint32_t src_len,
 
   // Allocate the decoder from the bump region; reject an object over the
   // bump limit or past the region end.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
-  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
+  void* dec = bump_alloc((uint32_t)slot->obj_size());
+  if (slot->obj_size() > BUMP_LIMIT || dec == NULL) {
     meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
   }
-  memset(dec, 0, slot->obj_size);
+  memset(dec, 0, slot->obj_size());
 
   wuffs_base__status status =
-      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+      slot->init(dec, slot->obj_size(), WUFFS_VERSION, 0);
   if (status.repr != NULL) {
     meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
@@ -636,14 +639,14 @@ static int32_t frame_count(uint32_t src_off, uint32_t src_len,
 
   // Allocate the decoder from the bump region; reject an object over the
   // bump limit or past the region end.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
-  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
+  void* dec = bump_alloc((uint32_t)slot->obj_size());
+  if (slot->obj_size() > BUMP_LIMIT || dec == NULL) {
     return WUFFS_WASM_ERR_DECODE;
   }
-  memset(dec, 0, slot->obj_size);
+  memset(dec, 0, slot->obj_size());
 
   wuffs_base__status status =
-      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+      slot->init(dec, slot->obj_size(), WUFFS_VERSION, 0);
   if (status.repr != NULL) {
     return WUFFS_WASM_ERR_DECODE;
   }
@@ -709,14 +712,14 @@ static int32_t animation_loops(uint32_t src_off, uint32_t src_len,
 
   // Allocate the decoder from the bump region; reject an object over the
   // bump limit or past the region end.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
-  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
+  void* dec = bump_alloc((uint32_t)slot->obj_size());
+  if (slot->obj_size() > BUMP_LIMIT || dec == NULL) {
     return WUFFS_WASM_ERR_DECODE;
   }
-  memset(dec, 0, slot->obj_size);
+  memset(dec, 0, slot->obj_size());
 
   wuffs_base__status status =
-      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+      slot->init(dec, slot->obj_size(), WUFFS_VERSION, 0);
   if (status.repr != NULL) {
     return WUFFS_WASM_ERR_DECODE;
   }
@@ -808,16 +811,16 @@ static int32_t decode_frame(uint32_t src_off, uint32_t src_len,
 
   // Allocate the decoder from the bump region; reject an object over the
   // bump limit or past the region end.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
-  if (slot->obj_size > BUMP_LIMIT || dec == NULL) {
+  void* dec = bump_alloc((uint32_t)slot->obj_size());
+  if (slot->obj_size() > BUMP_LIMIT || dec == NULL) {
     dec_meta->err = WUFFS_WASM_ERR_DECODE;
     frame_meta->err = WUFFS_WASM_ERR_DECODE;
     return WUFFS_WASM_ERR_DECODE;
   }
-  memset(dec, 0, slot->obj_size);
+  memset(dec, 0, slot->obj_size());
 
   wuffs_base__status status =
-      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+      slot->init(dec, slot->obj_size(), WUFFS_VERSION, 0);
   if (status.repr != NULL) {
     dec_meta->err = WUFFS_WASM_ERR_DECODE;
     frame_meta->err = WUFFS_WASM_ERR_DECODE;
@@ -1012,9 +1015,9 @@ static int32_t read_image_metadata(uint32_t src_off, uint32_t src_len,
   uint64_t blob_need = (uint64_t)WUFFS_WASM_METADATA_HAVE_LEN +
                        (uint64_t)WUFFS_WASM_METADATA_ICC_CAP +
                        (uint64_t)2 * (uint64_t)src_len;
-  if ((uint64_t)slot->obj_size > (uint64_t)BUMP_LIMIT ||
+  if ((uint64_t)slot->obj_size() > (uint64_t)BUMP_LIMIT ||
       blob_need > (uint64_t)BUMP_LIMIT ||
-      (uint64_t)slot->obj_size + blob_need > (uint64_t)BUMP_LIMIT) {
+      (uint64_t)slot->obj_size() + blob_need > (uint64_t)BUMP_LIMIT) {
     memset(hdr, 0, sizeof(*hdr));
     hdr->err = WUFFS_WASM_ERR_DECODE;
     hdr->format = fourcc;
@@ -1023,7 +1026,7 @@ static int32_t read_image_metadata(uint32_t src_off, uint32_t src_len,
 
   // Allocate decoder object first, then the destination backing store and
   // the three temp blob buffers.
-  void* dec = bump_alloc((uint32_t)slot->obj_size);
+  void* dec = bump_alloc((uint32_t)slot->obj_size());
   uint8_t* have_ptr = bump_alloc(WUFFS_WASM_METADATA_HAVE_LEN);
   uint8_t* icc_buf = bump_alloc(WUFFS_WASM_METADATA_ICC_CAP);
   uint8_t* exif_buf = bump_alloc(src_len);
@@ -1035,7 +1038,7 @@ static int32_t read_image_metadata(uint32_t src_off, uint32_t src_len,
     hdr->format = fourcc;
     return WUFFS_WASM_ERR_DECODE;
   }
-  memset(dec, 0, slot->obj_size);
+  memset(dec, 0, slot->obj_size());
   uint32_t exif_len = 0;
   uint32_t icc_len = 0;
   uint32_t xmp_len = 0;
@@ -1050,7 +1053,7 @@ static int32_t read_image_metadata(uint32_t src_off, uint32_t src_len,
   };
 
   wuffs_base__status status =
-      slot->init(dec, slot->obj_size, WUFFS_VERSION, 0);
+      slot->init(dec, slot->obj_size(), WUFFS_VERSION, 0);
   if (status.repr != NULL) {
     memset(hdr, 0, sizeof(*hdr));
     hdr->err = WUFFS_WASM_ERR_DECODE;
